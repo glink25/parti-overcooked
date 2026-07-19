@@ -1,0 +1,7 @@
+node_modules/
+dist/
+parti.room.zip
+npm-debug.log*
+package-lock.json
+verifier/runs
+.DS_Store

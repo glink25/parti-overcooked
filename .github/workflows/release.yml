@@ -1,0 +1,51 @@
+name: release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
+      - name: Package parti.room.zip
+        working-directory: dist
+        run: zip -r "$GITHUB_WORKSPACE/parti.room.zip" .
+      - name: Create or update release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          [[ "$TAG" != v* ]] && TAG="v$(jq -r .version dist/parti.room.json)"
+          cp dist/parti.room.json parti.room.json
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" parti.room.zip parti.room.json --clobber
+            gh release edit "$TAG" --latest
+          else
+            gh release create "$TAG" parti.room.zip parti.room.json --title "$TAG" --generate-notes --latest
+          fi
+      - name: Publish dist/ to the parti-package branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan parti-package-tmp
+          git rm -rf . >/dev/null 2>&1 || true
+          # 关键：先把 dist 移出仓库，再 git clean 清掉 node_modules 等未跟踪文件，
+          # 否则孤儿分支会把 node_modules 一起提交（jsdelivr 判定包超限，市场无法安装）
+          TMPD="$(mktemp -d)"
+          cp -r dist "$TMPD/dist"
+          git clean -fdx
+          cp -r "$TMPD/dist"/* .
+          git add -A
+          git commit -m "parti package ${GITHUB_REF_NAME}"
+          git push -f origin HEAD:parti-package

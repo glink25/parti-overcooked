@@ -1,0 +1,52 @@
+{
+  "partiVersion": "0.1.0",
+  "protocolVersion": 1,
+  "id": "overcooked-party",
+  "name": "胡闹厨房派对",
+  "version": "1.1.0",
+  "packageMode": "blob",
+  "description": "Low-poly 3D 合作厨房：2-4 人切菜、煮汤、装盘、上菜、洗碗，十种菜谱三张地图挑战配合极限。",
+  "cover": "cover.png",
+  "tags": [
+    "co-op",
+    "3d"
+  ],
+  "author": {
+    "name": "glink25"
+  },
+  "entry": {
+    "ui": "index.html",
+    "worker": "room.worker.js"
+  },
+  "room": {
+    "minPlayers": 2,
+    "maxPlayers": 4,
+    "allowSpectators": false
+  },
+  "sync": {
+    "mode": "snapshot"
+  },
+  "permissions": {
+    "network": false,
+    "storage": "session",
+    "camera": false,
+    "microphone": false,
+    "clipboard": false,
+    "sensors": []
+  },
+  "actions": {
+    "selectMap": {
+      "payload": "{ mapId: 'classic' | 'split' | 'ring' }"
+    },
+    "start": {},
+    "rematch": {},
+    "toLobby": {},
+    "move": {
+      "payload": "{ dx: number, dz: number }"
+    },
+    "work": {
+      "payload": "{ on: boolean }"
+    },
+    "interact": {}
+  }
+}
