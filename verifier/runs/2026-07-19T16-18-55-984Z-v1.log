@@ -1,0 +1,84 @@
+command: node verifier/v1/run.mjs --src
+exit: 0
+
+== manifest ==
+PASS  id/name/version/partiVersion 非空字符串
+PASS  protocolVersion 是数字
+PASS  entry 含 ui 与 worker 字符串
+PASS  packageMode 合法
+PASS  tags 非空无重复
+PASS  sensors 合法
+PASS  room 人数 2-4
+
+== worker 契约（源码） ==
+PASS  保留 canonical import
+PASS  无相对路径 import
+PASS  无其他第三方 import
+PASS  存在 export default
+PASS  defineRoom 定义可加载
+PASS  initialState 是函数
+PASS  actions 全部同步（非 async）
+
+== 大厅与准入 ==
+PASS  初始 phase=lobby
+PASS  hostId 记录
+PASS  单人 start 被拒绝
+PASS  非房主不能选图
+PASS  非法 mapId 被拒绝
+PASS  房主选图成功
+PASS  非房主 start 被拒绝
+
+== 经典厨房：完整做菜流程 ==
+PASS  start 进入 countdown
+PASS  倒计时期间移动被忽略
+PASS  倒计时结束进入 playing
+PASS  game:start 广播
+PASS  layout 尺寸 13x9
+PASS  灶台动态已建
+PASS  出生点落位
+PASS  move 钳制到单位向量
+PASS  锅里 2 份番茄
+PASS  3 番茄入锅开始烹饪
+PASS  p2 拿到盘子
+PASS  干净盘子减少
+PASS  汤煮好了
+PASS  pot:ready 广播
+PASS  首波订单已生成
+PASS  p2 端到番茄浓汤
+PASS  锅恢复空闲
+PASS  上菜成功得分
+PASS  订单被移除
+PASS  脏盘待返回
+PASS  order:served 广播
+PASS  脏盘返回
+PASS  洗碗完成
+PASS  洋葱汤煮好
+PASS  放置过久烧糊
+PASS  pot:burnt 广播
+PASS  烧糊的锅可清空
+PASS  订单过期扣分且不为负
+PASS  时间到进入 ended
+PASS  game:over 广播
+PASS  rematch 重新开局
+PASS  rematch 进入 playing
+PASS  rematch 盘子重置
+PASS  toLobby 回大厅
+
+== 一线天：地图分隔与通道 ==
+PASS  split 开局
+PASS  台面墙无法直线穿越
+PASS  中央通道可穿越到右半区
+
+== 环岛餐吧：全配方流程 ==
+PASS  ring 开局 15x11
+PASS  ring 盘子 5 个
+PASS  ring 3 个灶台
+PASS  ring 拿到番茄
+PASS  ring 切菜完成
+PASS  ring 可正常结束
+
+== 玩家离开 ==
+PASS  离开的玩家被移除
+PASS  全部离开回到 lobby
+
+66 passed, 0 failed
