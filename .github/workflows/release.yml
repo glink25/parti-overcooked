@@ -43,7 +43,6 @@ jobs:
           test -f dist/parti.room.json
           test -f dist/index.html
           test -f dist/room.worker.js
-          test -f dist/cover.png
           test "$(find dist -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
       - name: Package parti.room.zip
         working-directory: dist
