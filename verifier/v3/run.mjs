@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRoomDefinition, makeCtx, createRoom, join, leave, act, pump, lastEvents, walkTo } from './harness.mjs';
+import { musicModeFor, orderWarningLevel, potWarningLevel } from '../../src/client/audio.js';
 import { collides, reconcilePrediction, stepMovement } from '../../src/client/movement.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -35,6 +36,15 @@ ok('packageMode 合法', manifest.packageMode === 'blob' || manifest.packageMode
 ok('tags 非空无重复', !manifest.tags || (Array.isArray(manifest.tags) && manifest.tags.every(nonEmptyStr) && new Set(manifest.tags).size === manifest.tags.length));
 ok('sensors 合法', !manifest.permissions?.sensors || (Array.isArray(manifest.permissions.sensors) && manifest.permissions.sensors.every((s) => ['accelerometer', 'gyroscope', 'magnetometer'].includes(s))));
 ok('room 人数 2-4', manifest.room?.minPlayers === 2 && manifest.room?.maxPlayers === 4);
+
+section('动态音频阶段');
+ok('大厅使用轻松音乐', musicModeFor('lobby', 180) === 'lobby');
+ok('倒计时使用渐强音乐', musicModeFor('countdown', 180) === 'countdown');
+ok('正常对局使用派对音乐', musicModeFor('playing', 31) === 'playing');
+ok('最后 30 秒切换冲刺音乐', musicModeFor('playing', 30) === 'urgent');
+ok('结算停止循环音乐', musicModeFor('ended', 0) === null);
+ok('锅在烧糊前分级催促', potWarningLevel(3.9) === null && potWarningLevel(4) === 'warning' && potWarningLevel(8) === 'critical');
+ok('订单最后 20/8 秒分级催促', orderWarningLevel(21) === null && orderWarningLevel(20) === 'warning' && orderWarningLevel(8) === 'critical');
 
 // ---------------------------------------------------------------------------
 // 2. Worker 产物契约（docs/worker-api.md / room-dev-harness.md）

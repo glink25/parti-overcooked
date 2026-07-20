@@ -5,6 +5,7 @@
 //  - 交互 DOM 节点保持稳定，不在快照回调里重建（docs/room-dev-harness.md）
 import * as THREE from 'three';
 import demoStateJson from './demoState.json';
+import { createAudioEngine, orderWarningLevel, potWarningLevel } from './audio.js';
 import { PLAYER_R, reconcilePrediction, stepMovement } from './movement.js';
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ const el = {
   rematchBtn: $('rematch-btn'), tolobbyBtn: $('tolobby-btn'),
   touchUi: $('touch-ui'), joy: $('joy'), joyKnob: $('joy-knob'),
   btnInteract: $('btn-interact'), btnWork: $('btn-work'),
+  audioToggle: $('audio-toggle'),
   bubble: $('bubble'), bubbleE: $('bubble-e'), bubbleQ: $('bubble-q'), bubbleInfo: $('bubble-info'),
   toasts: $('toasts'),
 };
@@ -136,45 +138,29 @@ function toast(text, kind = '') {
 }
 
 // ---------------------------------------------------------------------------
-// 音效（WebAudio 程序化合成，无外部资源）
+// 程序化音乐与音效（无外部资源，首次用户操作后解锁）
 // ---------------------------------------------------------------------------
-let audioCtx = null;
-function ac() {
-  if (!audioCtx) {
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* ignore */ }
-  }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-  return audioCtx;
+const audio = createAudioEngine();
+
+function updateAudioToggle() {
+  const muted = audio.isMuted();
+  el.audioToggle.textContent = muted ? '🔇' : '🔊';
+  el.audioToggle.classList.toggle('muted', muted);
+  el.audioToggle.setAttribute('aria-pressed', String(muted));
+  el.audioToggle.setAttribute('aria-label', muted ? '开启声音' : '关闭声音');
+  el.audioToggle.title = muted ? '开启声音' : '关闭声音';
 }
-function beep(freq, dur = 0.12, type = 'sine', vol = 0.16, delay = 0) {
-  const ctx = ac();
-  if (!ctx) return;
-  const t0 = ctx.currentTime + delay;
-  const o = ctx.createOscillator();
-  const g = ctx.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, t0);
-  g.gain.setValueAtTime(0, t0);
-  g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
-  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-  o.connect(g).connect(ctx.destination);
-  o.start(t0);
-  o.stop(t0 + dur + 0.05);
-}
-const SFX = {
-  orderNew: () => { beep(880, .1, 'triangle'); beep(1318, .14, 'triangle', .16, .1); },
-  served: () => { beep(660, .09, 'triangle'); beep(880, .09, 'triangle', .16, .08); beep(1320, .18, 'triangle', .18, .16); },
-  expired: () => { beep(196, .3, 'sawtooth', .12); beep(147, .35, 'sawtooth', .12, .12); },
-  potReady: () => { beep(988, .12, 'sine'); beep(1319, .2, 'sine', .14, .1); },
-  burnt: () => { for (let i = 0; i < 3; i++) beep(233, .14, 'square', .13, i * .18); },
-  dirty: () => { beep(320, .07, 'square', .1); beep(260, .08, 'square', .1, .07); },
-  pickup: () => beep(520, .06, 'triangle', .1),
-  start: () => { beep(523, .1, 'triangle'); beep(784, .1, 'triangle', .16, .09); beep(1047, .22, 'triangle', .18, .18); },
-  over: () => { [523, 659, 784, 1047].forEach((f, i) => beep(f, .18, 'triangle', .16, i * .15)); },
-  join: () => beep(700, .08, 'sine', .1),
-};
-window.addEventListener('pointerdown', () => ac(), { once: true });
-window.addEventListener('keydown', () => ac(), { once: true });
+updateAudioToggle();
+el.audioToggle.addEventListener('click', () => {
+  const willMute = !audio.isMuted();
+  if (!willMute) audio.setMuted(false);
+  else audio.setMuted(true);
+  updateAudioToggle();
+  if (!willMute) audio.playSfx('ui');
+});
+window.addEventListener('pointerdown', () => audio.unlock(), { once: true, capture: true });
+window.addEventListener('keydown', () => audio.unlock(), { once: true, capture: true });
+window.addEventListener('beforeunload', () => audio.destroy(), { once: true });
 
 // ---------------------------------------------------------------------------
 // three.js 基础
@@ -833,7 +819,6 @@ function applyPlayers(state, dt) {
         mesh.scale.setScalar(1.15);
         anchor.add(mesh);
       }
-      if (id === myId && cJson) SFX.pickup();
     }
 
     // 朝向
@@ -1181,13 +1166,13 @@ function buildLobbyOnce() {
     const btn = document.createElement('button');
     btn.className = 'map-card';
     btn.innerHTML = `<div class="m-ico">${m.ico}</div><div class="m-name">${m.name}</div><div class="m-desc">${m.desc}</div>`;
-    btn.onclick = () => parti.action('selectMap', { mapId: m.id });
+    btn.onclick = () => { audio.playSfx('ui'); parti.action('selectMap', { mapId: m.id }); };
     el.mapCards.appendChild(btn);
     mapCardEls.set(m.id, btn);
   }
-  el.startBtn.onclick = () => parti.action('start');
-  el.rematchBtn.onclick = () => parti.action('rematch');
-  el.tolobbyBtn.onclick = () => parti.action('toLobby');
+  el.startBtn.onclick = () => { audio.playSfx('ui'); parti.action('start'); };
+  el.rematchBtn.onclick = () => { audio.playSfx('ui'); parti.action('rematch'); };
+  el.tolobbyBtn.onclick = () => { audio.playSfx('ui'); parti.action('toLobby'); };
 }
 buildLobbyOnce();
 
@@ -1271,8 +1256,67 @@ function setPhase(phase, state) {
 // ---------------------------------------------------------------------------
 let latestState = null;
 
+function facingTarget(state, player) {
+  if (!state || !state.layout || !player) return null;
+  const face = player.face || { dx: 0, dz: 1 };
+  const tx = Math.floor(player.x + face.dx * 0.95);
+  const tz = Math.floor(player.z + face.dz * 0.95);
+  const key = tx + ',' + tz;
+  const st = state.layout.stationAt && state.layout.stationAt[key];
+  return st ? { st, key, dyn: state.stations && state.stations[key] } : null;
+}
+
+function applyAudioState(previous, state) {
+  audio.setGameState(state.phase, state.timeLeft || 0);
+  if (!previous) return;
+
+  if (state.phase === 'countdown') {
+    const before = Math.max(1, Math.ceil(previous.countdown || 0));
+    const now = Math.max(1, Math.ceil(state.countdown || 0));
+    if (previous.phase === 'countdown' && now !== before) audio.playSfx('countdown');
+  }
+
+  if (previous.phase !== 'playing' || state.phase !== 'playing') return;
+  const id = parti.playerId;
+  const beforeMe = previous.players && previous.players[id];
+  const me = state.players && state.players[id];
+  if (!beforeMe || !me) return;
+
+  const beforeCarry = beforeMe.carrying;
+  const carry = me.carrying;
+  const beforeJson = beforeCarry ? JSON.stringify(beforeCarry) : '';
+  const carryJson = carry ? JSON.stringify(carry) : '';
+  if (beforeJson !== carryJson) {
+    const target = facingTarget(previous, beforeMe);
+    if (!beforeCarry && carry) {
+      audio.playSfx('pickup');
+    } else if (beforeCarry && !carry) {
+      if (target && target.st.type === 'stove') audio.playSfx('potDrop');
+      else if (target && target.st.type === 'trash') audio.playSfx('trash');
+      else if (!target || target.st.type !== 'window') audio.playSfx('place');
+    } else if (beforeCarry && carry) {
+      audio.playSfx('dishReady');
+    }
+  }
+
+  const beforeTarget = facingTarget(previous, beforeMe);
+  if (beforeMe.working && beforeTarget) {
+    if (beforeTarget.st.type === 'board') {
+      const beforeItem = beforeTarget.dyn && beforeTarget.dyn.item;
+      const afterItem = state.stations && state.stations[beforeTarget.key] && state.stations[beforeTarget.key].item;
+      if (beforeItem && beforeItem.k === 'raw' && afterItem && afterItem.k === 'chopped') audio.playSfx('workDone');
+    } else if (beforeTarget.st.type === 'sink') {
+      const beforeDirty = previous.plates ? previous.plates.dirty : 0;
+      const dirty = state.plates ? state.plates.dirty : 0;
+      if (dirty < beforeDirty) audio.playSfx('workDone');
+    }
+  }
+}
+
 parti.onState((state) => {
+  const previousState = latestState;
   latestState = state;
+  applyAudioState(previousState, state);
   if (state.layout && state.gameSeq !== builtGameSeq) {
     builtGameSeq = state.gameSeq;
     buildMap(state.layout);
@@ -1297,16 +1341,16 @@ parti.onState((state) => {
   }
 });
 
-parti.onEvent('game:countdown', (p) => { toast(`地图：${p.mapName || ''}，各就各位！`); SFX.join(); });
-parti.onEvent('game:start', () => { toast('开工！🍳', 'good'); SFX.start(); });
-parti.onEvent('order:new', (p) => { toast(`新订单：${p.name}`); SFX.orderNew(); });
-parti.onEvent('order:served', (p) => { toast(`上菜成功 +${p.points + p.tip}（含小费 ${p.tip}）`, 'good'); SFX.served(); });
-parti.onEvent('order:expired', (p) => { toast(`订单超时：${p.name}`, 'bad'); SFX.expired(); });
-parti.onEvent('pot:ready', () => { toast('汤煮好了，快装盘！', 'good'); SFX.potReady(); });
-parti.onEvent('pot:burnt', () => { toast('锅烧糊了！空手去倒掉', 'bad'); SFX.burnt(); });
-parti.onEvent('plate:dirty', () => { toast('脏盘子回到水槽了'); SFX.dirty(); });
-parti.onEvent('game:over', (p) => { SFX.over(); });
-parti.onEvent('player:joined', (p) => { toast(`${p.name} 加入了厨房`); SFX.join(); });
+parti.onEvent('game:countdown', (p) => { toast(`地图：${p.mapName || ''}，各就各位！`); audio.playSfx('join'); });
+parti.onEvent('game:start', () => { toast('开工！🍳', 'good'); audio.playSfx('start'); });
+parti.onEvent('order:new', (p) => { toast(`新订单：${p.name}`); audio.playSfx('orderNew'); });
+parti.onEvent('order:served', (p) => { toast(`上菜成功 +${p.points + p.tip}（含小费 ${p.tip}）`, 'good'); audio.playSfx('served'); });
+parti.onEvent('order:expired', (p) => { toast(`订单超时：${p.name}`, 'bad'); audio.playSfx('expired'); });
+parti.onEvent('pot:ready', () => { toast('汤煮好了，快装盘！', 'good'); audio.playSfx('potReady'); });
+parti.onEvent('pot:burnt', () => { toast('锅烧糊了！空手去倒掉', 'bad'); audio.playSfx('burnt'); });
+parti.onEvent('plate:dirty', () => { toast('脏盘子回到水槽了'); audio.playSfx('dirty'); });
+parti.onEvent('game:over', () => { audio.playSfx('over'); });
+parti.onEvent('player:joined', (p) => { toast(`${p.name} 加入了厨房`); audio.playSfx('join'); });
 parti.onEvent('__error', (p) => { parti.log('room error', p); });
 
 // ---------------------------------------------------------------------------
@@ -1443,6 +1487,54 @@ el.btnWork.addEventListener('lostpointercapture', workRelease);
 // ---------------------------------------------------------------------------
 let perfNow = 0;
 let lastTs = 0;
+let nextWorkSoundAt = 0;
+let nextPotWarningAt = 0;
+let nextOrderWarningAt = 0;
+
+function updateWorkSound(ts) {
+  if (!latestState || latestState.phase !== 'playing') return;
+  const me = latestState.players && latestState.players[parti.playerId];
+  if (!me || !me.working || ts < nextWorkSoundAt) return;
+  const target = facingTarget(latestState, me);
+  if (!target) return;
+  if (target.st.type === 'board' && target.dyn && target.dyn.item && target.dyn.item.k === 'raw') {
+    audio.playSfx('chop');
+    nextWorkSoundAt = ts + 190;
+  } else if (target.st.type === 'sink' && !me.carrying && latestState.plates && latestState.plates.dirty > 0) {
+    audio.playSfx('wash');
+    nextWorkSoundAt = ts + 240;
+  }
+}
+
+function updateWarningSounds(ts) {
+  if (!latestState || latestState.phase !== 'playing') {
+    nextPotWarningAt = 0;
+    nextOrderWarningAt = 0;
+    return;
+  }
+
+  let hottestPot = 0;
+  for (const station of Object.values(latestState.stations || {})) {
+    if (station && station.phase === 'ready') hottestPot = Math.max(hottestPot, station.t || 0);
+  }
+  const potLevel = potWarningLevel(hottestPot);
+  if (potLevel && ts >= nextPotWarningAt) {
+    audio.playSfx(potLevel === 'critical' ? 'potBubbleUrgent' : 'potBubble');
+    nextPotWarningAt = ts + (potLevel === 'critical' ? 480 : 900);
+  } else if (!potLevel) {
+    nextPotWarningAt = 0;
+  }
+
+  let shortestOrder = Infinity;
+  for (const order of latestState.orders || []) shortestOrder = Math.min(shortestOrder, order.t || 0);
+  const orderLevel = orderWarningLevel(shortestOrder);
+  if (orderLevel && ts >= nextOrderWarningAt) {
+    audio.playSfx(orderLevel === 'critical' ? 'orderCritical' : 'orderHurry');
+    nextOrderWarningAt = ts + (orderLevel === 'critical' ? 2200 : 4500);
+  } else if (!orderLevel) {
+    nextOrderWarningAt = 0;
+  }
+}
 
 function frame(ts) {
   requestAnimationFrame(frame);
@@ -1461,6 +1553,8 @@ function frame(ts) {
   stepPrediction(dt);
   interpolatePlayers(dt);
   updateBubble();
+  updateWorkSound(ts);
+  updateWarningSounds(ts);
 
   // 灶台汤水翻滚等时间动画在 applyStations 中用 perfNow 驱动
   if (latestState && (latestState.phase === 'playing' || latestState.phase === 'countdown') && stationNodes.size) {

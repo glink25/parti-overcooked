@@ -67,6 +67,17 @@
     font-size: 12px; font-weight: 700; color: #fff8ec; text-shadow: 0 1px 3px rgba(0,0,0,.6);
     background: rgba(62,39,35,.55); padding: 6px 10px; border-radius: 10px; line-height: 1.6;
   }
+  #audio-toggle {
+    position: absolute; z-index: 20;
+    top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
+    width: 44px; height: 44px; padding: 0; border: 3px solid var(--ink); border-radius: 14px;
+    background: rgba(255, 248, 236, .94); box-shadow: 0 3px 0 rgba(0,0,0,.35);
+    color: var(--ink); font-size: 21px; cursor: pointer; pointer-events: auto;
+  }
+  #audio-toggle:hover { transform: translateY(-2px); }
+  #audio-toggle:active { transform: translateY(1px); box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+  #audio-toggle:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 3px; }
+  #audio-toggle.muted { opacity: .72; }
 
   /* ---------- 倒计时 ---------- */
   #countdown {
@@ -198,6 +209,7 @@
 <body>
 <div id="app">
   <div id="scene-host"></div>
+  <button id="audio-toggle" type="button" aria-label="关闭声音" aria-pressed="false" title="关闭声音">🔊</button>
 
   <div id="hud" class="hidden">
     <div id="hud-tl">
