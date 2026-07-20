@@ -1,7 +1,7 @@
 import { defineRoom } from '@parti/worker-sdk';
 
 /**
- * 胡闹厨房派对（Overcooked Party）— Parti 房间权威逻辑
+ * 新手上厨 — Parti 房间权威逻辑
  *
  * 架构约束（docs/worker-api.md）：
  *  - 单文件，仅允许 import { defineRoom }，不 import 任何第三方/相对模块
@@ -588,7 +588,7 @@ function doInteract(ctx, p) {
 // 房间定义
 // ---------------------------------------------------------------------------
 export default defineRoom({
-  meta: { name: '胡闹厨房派对', minPlayers: 2, maxPlayers: 4 },
+  meta: { name: '新手上厨', minPlayers: 2, maxPlayers: 4 },
 
   initialState() {
     return {

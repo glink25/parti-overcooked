@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>胡闹厨房派对</title>
+<title>新手上厨</title>
 <style>
   :root {
     --ink: #3e2723;
@@ -19,8 +19,16 @@
     font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
     background: #2b1d16; color: var(--ink);
     user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
   }
-  #app { position: fixed; inset: 0; }
+  #app {
+    position: fixed; inset: 0;
+    user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+  }
+  #app.gesture-locked { touch-action: none; }
   #scene-host, #scene-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block; }
   .hidden { display: none !important; }
 
@@ -94,6 +102,7 @@
   .overlay {
     position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     background: rgba(43, 29, 22, .78); backdrop-filter: blur(6px); padding: 20px; overflow-y: auto;
+    touch-action: pan-y; overscroll-behavior: contain;
   }
   .panel {
     background: var(--paper); border: 4px solid var(--ink); border-radius: 22px;
@@ -204,6 +213,59 @@
   .toast.bad { background: rgba(160, 40, 40, .95); }
   .toast.out { opacity: 0; transform: translateY(-12px); transition: all .35s; }
   @keyframes toast-in { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  /* ---------- v2 餐牌式视觉语言 ---------- */
+  .chip, .order-card, .panel, #bubble, .map-card, .p-row, .stat {
+    border-color: #4b2f27;
+    box-shadow: 0 4px 0 rgba(38,23,18,.42), inset 0 1px 0 rgba(255,255,255,.7);
+  }
+  .chip { background: linear-gradient(160deg, rgba(255,253,244,.97), rgba(255,232,190,.95)); }
+  #score-chip { background: linear-gradient(160deg, #fff5bd, #ffd56d); }
+  .order-card {
+    position: relative; overflow: hidden; padding: 7px 11px 9px;
+    background: linear-gradient(145deg, #fffdf3 0 70%, #f4e3c6 100%);
+  }
+  .order-card::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: #f6a33c; }
+  .o-head { display: flex; align-items: center; gap: 7px; }
+  .o-type { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 9px; background: #ffe1a6; font-size: 16px; }
+  .order-card .o-name { display: flex; flex-direction: column; line-height: 1.05; }
+  .order-card .o-name small { color: #a1603d; font-size: 10px; margin-top: 3px; }
+  .order-card .o-dots i { width: 14px; height: 14px; box-shadow: inset -2px -2px 0 rgba(0,0,0,.12); }
+  .order-card.urgent { animation: order-shake .55s ease-in-out infinite alternate; background: #fff0e9; }
+  @keyframes order-shake { from { transform: rotate(-.5deg); } to { transform: rotate(.5deg) scale(1.015); } }
+  .overlay { background: radial-gradient(circle at 50% 30%, rgba(113,77,55,.5), rgba(26,18,25,.9)); }
+  .panel {
+    background:
+      radial-gradient(circle at 15% 12%, rgba(255,255,255,.75) 0 2px, transparent 3px),
+      linear-gradient(145deg, #fffdf4, #f6dfb9);
+    background-size: 34px 34px, auto;
+  }
+  .panel h1, .panel h2 { color: #4b2f27; text-shadow: 0 2px 0 #fff; }
+  .map-card { overflow: hidden; padding: 0 12px 12px; background: #fffaf0; }
+  .map-card.sel { background: #fff7e5; box-shadow: 0 6px 0 rgba(0,0,0,.34), 0 0 0 3px rgba(255,183,66,.35); }
+  .m-preview { height: 62px; margin: 0 -12px 9px; position: relative; overflow: hidden; background: #d79a66; border-bottom: 3px solid #4b2f27; }
+  .m-preview i { position: absolute; width: 35px; height: 22px; bottom: 7px; border: 3px solid rgba(51,35,29,.65); transform: rotate(6deg); }
+  .m-preview i:nth-child(1) { left: 12px; } .m-preview i:nth-child(2) { left: 60px; bottom: 17px; } .m-preview i:nth-child(3) { right: 10px; transform: rotate(-7deg); }
+  .m-preview span { position: absolute; right: 9px; top: 3px; font-size: 25px; filter: drop-shadow(0 2px 0 rgba(0,0,0,.25)); }
+  .theme-classic .m-preview { background: linear-gradient(#92c8d5 0 48%, #dda25b 49%); }
+  .theme-classic .m-preview i { background: #f2d9a6; }
+  .theme-split .m-preview { background: linear-gradient(#8edcff 0 48%, #bceade 49%); }
+  .theme-split .m-preview i { background: #ffd85d; border-color: #4d83bd; }
+  .theme-ring .m-preview { background: linear-gradient(#48caff 0 48%, #47ced7 49%); }
+  .theme-ring .m-preview i { background: #77d9c9; border-color: #ff7b72; }
+  .map-card .m-theme { display: inline-block; margin-top: 3px; padding: 2px 7px; border-radius: 999px; background: #f1dfc5; color: #815538; font-size: 10px; font-weight: 900; }
+  .big-btn { background: linear-gradient(#ff875e, #ed5938); box-shadow: 0 6px 0 #963d2b; }
+  #carry-chip { background: linear-gradient(150deg, #fffbdc, #ffd875); }
+  @media (max-width: 680px), (max-height: 560px) {
+    .panel { padding: 16px; gap: 9px; }
+    .map-card { width: 138px; }
+    .m-preview { height: 46px; }
+    .map-card .m-desc { display: none; }
+    #orders { top: calc(7px + env(safe-area-inset-top, 0px)); gap: 5px; max-width: 68vw; flex-wrap: nowrap; overflow: hidden; }
+    .order-card { min-width: 92px; padding: 5px 7px 7px; }
+    .order-card .o-name { font-size: 11px; } .o-type { width: 22px; height: 22px; font-size: 13px; }
+    #hint { display: none; }
+  }
 </style>
 </head>
 <body>

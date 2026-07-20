@@ -1,4 +1,4 @@
-// 胡闹厨房派对 — Parti 房间 UI（low-poly 3D）
+// 新手上厨 — Parti 房间 UI（low-poly 3D）
 // 约束（docs/client-api.md）：
 //  - 不 import 任何 SDK，全局 parti 由 Runtime 注入
 //  - onState 整体驱动渲染；onEvent 处理瞬时反馈；action 只提交意图
@@ -7,6 +7,11 @@ import * as THREE from 'three';
 import demoStateJson from './demoState.json';
 import { createAudioEngine, orderWarningLevel, potWarningLevel } from './audio.js';
 import { PLAYER_R, reconcilePrediction, stepMovement } from './movement.js';
+import { animateChefModel, kickChef, makeChefModel } from './visual/chef.js';
+import { createEnvironmentController } from './visual/environment.js';
+import { createEffectSystem } from './visual/effects.js';
+import { createMaterialSystem } from './visual/materials.js';
+import { computeRenderPixelRatio, detectQualityTier, qualitySettings, themeFor } from './visual/themes.js';
 
 // ---------------------------------------------------------------------------
 // 常量（与 worker 约定的展示层数据）
@@ -60,6 +65,7 @@ const MAP_META = [
 ];
 
 const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const GAME_DURATION = 180;
 
 // ---------------------------------------------------------------------------
 // parti 接入（含浏览器直开时的演示/降级模式）
@@ -100,6 +106,7 @@ if (DEMO) {
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const el = {
+  app: $('app'),
   sceneHost: $('scene-host'),
   hud: $('hud'),
   timeVal: $('time-val'), timeChip: $('time-chip'),
@@ -165,10 +172,14 @@ window.addEventListener('beforeunload', () => audio.destroy(), { once: true });
 // ---------------------------------------------------------------------------
 // three.js 基础
 // ---------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+const qualityTier = detectQualityTier();
+const quality = qualitySettings(qualityTier);
+const renderer = new THREE.WebGLRenderer({ antialias: quality.antialias, alpha: false });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 el.sceneHost.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -180,38 +191,42 @@ const hemi = new THREE.HemisphereLight(0xfff4e0, 0x8a6a55, 1.05);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe8c0, 1.6);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(quality.shadowSize, quality.shadowSize);
 sun.shadow.bias = -0.002;
 scene.add(sun);
 scene.add(sun.target);
 
 function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
+  const w = Math.max(1, el.sceneHost.clientWidth || window.innerWidth);
+  const h = Math.max(1, el.sceneHost.clientHeight || window.innerHeight);
+  renderer.setPixelRatio(computeRenderPixelRatio({
+    width: w,
+    height: h,
+    devicePixelRatio: window.devicePixelRatio,
+    maxPixelRatio: quality.maxPixelRatio,
+    pixelBudget: quality.pixelBudget,
+  }));
+  renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   fitCamera();
 }
 window.addEventListener('resize', resize);
+const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+if (resizeObserver) resizeObserver.observe(el.sceneHost);
 
 // ---------------------------------------------------------------------------
 // 低多边形建模
 // ---------------------------------------------------------------------------
-const matCache = new Map();
-function mat(color) {
-  if (!matCache.has(color)) {
-    matCache.set(color, new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.92, metalness: 0 }));
-  }
-  return matCache.get(color);
-}
-function box(w, h, d, color) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+const materials = createMaterialSystem();
+function mat(color, options) { return materials.get(color, options); }
+function box(w, h, d, color, options) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, options));
   m.castShadow = true;
   return m;
 }
-function cyl(rt, rb, h, color, seg = 12) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat(color));
+function cyl(rt, rb, h, color, seg = 12, options) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat(color, options));
   m.castShadow = true;
   return m;
 }
@@ -220,6 +235,16 @@ function sph(r, color, ws = 10, hs = 8) {
   m.castShadow = true;
   return m;
 }
+
+const effects = createEffectSystem(scene, qualityTier);
+const environment = createEnvironmentController({ scene, hemi, sun, mat, box, cyl, sph, qualityTier });
+window.addEventListener('beforeunload', () => {
+  if (resizeObserver) resizeObserver.disconnect();
+  disposeMap();
+  effects.dispose();
+  materials.dispose();
+  renderer.dispose();
+}, { once: true });
 
 // 食材小模型
 function makeIngredientMesh(g, chopped) {
@@ -331,45 +356,6 @@ function makeItemMesh(item) {
   return null;
 }
 
-// 厨师
-function makeChef(colorHex) {
-  const g = new THREE.Group();
-  const color = new THREE.Color(colorHex).getHex();
-
-  const body = cyl(0.26, 0.33, 0.6, color, 12);
-  body.position.y = 0.44;
-  const belly = box(0.3, 0.34, 0.05, 0xfafafa);
-  belly.position.set(0, 0.42, 0.27);
-  const head = sph(0.21, 0xffd2a1, 14, 10);
-  head.position.y = 0.92;
-  const hatBrim = cyl(0.23, 0.23, 0.07, 0xffffff, 14);
-  hatBrim.position.y = 1.1;
-  const hatTop = cyl(0.16, 0.19, 0.2, 0xffffff, 12);
-  hatTop.position.y = 1.22;
-  const eyeL = sph(0.028, 0x263238, 6, 5);
-  eyeL.position.set(-0.075, 0.96, 0.185);
-  const eyeR = eyeL.clone();
-  eyeR.position.x = 0.075;
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 8), mat(0xf0b183));
-  nose.rotation.x = Math.PI / 2;
-  nose.position.set(0, 0.9, 0.23);
-  nose.castShadow = true;
-
-  const armL = cyl(0.06, 0.06, 0.3, color, 8);
-  armL.position.set(-0.32, 0.55, 0.05);
-  armL.rotation.z = 0.5;
-  const armR = armL.clone();
-  armR.position.x = 0.32;
-  armR.rotation.z = -0.5;
-
-  const carryAnchor = new THREE.Group();
-  carryAnchor.position.set(0, 1.52, 0.1);
-
-  g.add(body, belly, head, hatBrim, hatTop, eyeL, eyeR, nose, armL, armR, carryAnchor);
-  g.userData = { body, head, hatTop, carryAnchor, carryingJson: '__none__', carryNode: null };
-  return g;
-}
-
 // 名字牌
 function makeNameSprite(name, colorHex) {
   const canvas = document.createElement('canvas');
@@ -455,29 +441,66 @@ function setBar(barGrp, frac, color) {
 let mapGroup = null;
 let builtGameSeq = -1;
 let builtLayout = null;
+let environmentProgress = 0;
 const stationNodes = new Map(); // key 'x,z' -> { group, dyn… }
+let activeTheme = themeFor('classic');
 
-const FLOOR_A = 0xe9d9b8;
-const FLOOR_B = 0xdfcda6;
+const STATION_STYLE = {
+  counter: { color: 0x9b6a4d, label: '' },
+  board: { color: 0xf0a83d, label: '切' },
+  stove: { color: 0xe64a3c, label: '煮' },
+  sink: { color: 0x35a9d6, label: '洗' },
+  plates: { color: 0xf4f0dc, label: '盘' },
+  window: { color: 0xffc42d, label: '菜' },
+  trash: { color: 0x607078, label: '弃' },
+  crate: { color: 0x86b94b, label: '食' },
+};
+
+function makeStationBadge(text, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const c = canvas.getContext('2d');
+  c.fillStyle = 'rgba(36,27,24,.88)'; c.beginPath(); c.roundRect(9, 9, 110, 110, 28); c.fill();
+  c.lineWidth = 9; c.strokeStyle = `#${new THREE.Color(color).getHexString()}`; c.stroke();
+  c.fillStyle = '#fff9e9'; c.font = '900 62px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(text, 64, 68);
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: true }));
+  sprite.scale.set(0.42, 0.42, 1); sprite.position.set(-0.29, 1.16, 0.38);
+  return sprite;
+}
+
+function addCabinetDetails(g, color) {
+  const kick = box(0.86, 0.08, 0.06, activeTheme.cabinetDark, { kind: 'wood', accent: activeTheme.trim });
+  kick.position.set(0, 0.08, 0.48);
+  const doorL = box(0.38, 0.48, 0.035, color, { kind: activeTheme.id === 'split' ? 'metal' : 'wood', accent: activeTheme.cabinetDark });
+  doorL.position.set(-0.21, 0.42, 0.49);
+  const doorR = doorL.clone(); doorR.position.x = 0.21;
+  const knobL = sph(0.025, activeTheme.metal, 6, 4); knobL.position.set(-0.05, 0.43, 0.525);
+  const knobR = knobL.clone(); knobR.position.x = 0.05;
+  g.add(kick, doorL, doorR, knobL, knobR);
+}
 
 function buildStation(st) {
   const g = new THREE.Group();
   g.position.set(st.x + 0.5, 0, st.z + 0.5);
-  const node = { group: g, type: st.type };
+  const node = { group: g, type: st.type, nextFx: 0 };
+  const style = STATION_STYLE[st.type] || STATION_STYLE.counter;
 
   if (st.type === 'counter') {
-    const body = box(0.96, 0.82, 0.96, 0x9c6b4f);
+    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: activeTheme.id === 'split' ? 'metal' : 'wood', accent: activeTheme.cabinetDark });
     body.position.y = 0.41;
-    const top = box(1.02, 0.09, 1.02, 0xd7ccc8);
+    const top = box(1.02, 0.09, 1.02, activeTheme.counterTop, { kind: activeTheme.id === 'ring' ? 'tile' : 'noise', accent: activeTheme.grout });
     top.position.y = 0.86;
     g.add(body, top);
+    addCabinetDetails(g, activeTheme.cabinet);
     node.itemAnchor = new THREE.Group();
     node.itemAnchor.position.y = 0.95;
     g.add(node.itemAnchor);
   } else if (st.type === 'board') {
-    const body = box(0.96, 0.82, 0.96, 0x8d5a3b);
+    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: 'wood', accent: activeTheme.cabinetDark });
     body.position.y = 0.41;
-    const top = box(0.9, 0.07, 0.7, 0xf3e5c0);
+    const top = box(0.9, 0.07, 0.7, 0xf2d18b, { kind: 'wood', accent: 0x9b683b });
     top.position.y = 0.87;
     const knife = box(0.2, 0.03, 0.06, 0xb0bec5);
     knife.position.set(0.28, 0.92, 0.24);
@@ -486,6 +509,8 @@ function buildStation(st) {
     handle.position.set(0.4, 0.92, 0.17);
     handle.rotation.y = 0.5;
     g.add(body, top, knife, handle);
+    addCabinetDetails(g, activeTheme.cabinet);
+    g.add(makeStationBadge(style.label, style.color));
     node.itemAnchor = new THREE.Group();
     node.itemAnchor.position.y = 0.93;
     g.add(node.itemAnchor);
@@ -493,7 +518,7 @@ function buildStation(st) {
     node.bar.position.set(0, 1.45, 0);
     g.add(node.bar);
   } else if (st.type === 'stove') {
-    const body = box(0.96, 0.82, 0.96, 0x546e7a);
+    const body = box(0.96, 0.82, 0.96, 0x465b66, { kind: 'metal', accent: 0x82939a });
     body.position.y = 0.41;
     const top = box(0.9, 0.06, 0.9, 0x263238);
     top.position.y = 0.86;
@@ -504,7 +529,11 @@ function buildStation(st) {
     const contents = cyl(0.27, 0.27, 0.06, 0xe53935, 16);
     contents.position.y = 1.16;
     contents.visible = false;
-    g.add(body, top, pot, rim, contents);
+    const burner = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.035, 6, 16), mat(0xff5a36, { emissive: 0xff3216, emissiveIntensity: 1.1 }));
+    burner.rotation.x = Math.PI / 2; burner.position.y = 0.91;
+    const knobA = cyl(0.045, 0.045, 0.055, 0xf2d14d, 8); knobA.rotation.x = Math.PI / 2; knobA.position.set(-0.2, 0.52, 0.5);
+    const knobB = knobA.clone(); knobB.position.x = 0.2;
+    g.add(body, top, burner, pot, rim, contents, knobA, knobB, makeStationBadge(style.label, style.color));
     node.contentsMesh = contents;
     // 锅里食材的浮动展示（解决"不知道锅里有什么"）
     node.floaters = new THREE.Group();
@@ -522,13 +551,15 @@ function buildStation(st) {
     node.bar.position.set(0, 1.5, 0);
     g.add(node.bar);
   } else if (st.type === 'sink') {
-    const body = box(0.96, 0.82, 0.96, 0x78909c);
+    const body = box(0.96, 0.82, 0.96, 0x527480, { kind: 'metal', accent: 0x91abb2 });
     body.position.y = 0.41;
     const basin = box(0.72, 0.1, 0.6, 0x4fc3f7);
     basin.position.y = 0.86;
     const tap = cyl(0.04, 0.04, 0.34, 0xb0bec5, 8);
     tap.position.set(-0.32, 1.02, -0.28);
-    g.add(body, basin, tap);
+    const tapTop = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 6, 10, Math.PI), mat(activeTheme.metal, { kind: 'metal' }));
+    tapTop.rotation.z = Math.PI / 2; tapTop.position.set(-0.21, 1.14, -0.23);
+    g.add(body, basin, tap, tapTop, makeStationBadge(style.label, style.color));
     node.dirtyAnchor = new THREE.Group();
     node.dirtyAnchor.position.set(0.1, 0.92, 0);
     g.add(node.dirtyAnchor);
@@ -536,11 +567,12 @@ function buildStation(st) {
     node.bar.position.set(0, 1.45, 0);
     g.add(node.bar);
   } else if (st.type === 'plates') {
-    const body = box(0.96, 0.82, 0.96, 0x7d5a46);
+    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: 'wood', accent: activeTheme.cabinetDark });
     body.position.y = 0.41;
     const top = box(1.02, 0.08, 1.02, 0xc8b8a8);
     top.position.y = 0.86;
-    g.add(body, top);
+    g.add(body, top, makeStationBadge(style.label, style.color));
+    addCabinetDetails(g, activeTheme.cabinet);
     node.stackAnchor = new THREE.Group();
     node.stackAnchor.position.y = 0.9;
     g.add(node.stackAnchor);
@@ -554,7 +586,9 @@ function buildStation(st) {
     bell.castShadow = true;
     const bellBase = cyl(0.17, 0.17, 0.03, 0xffd54f, 12);
     bellBase.position.set(0.25, 0.92, 0);
-    g.add(body, top, bell, bellBase);
+    const sign = box(0.76, 0.32, 0.08, 0x6f3428, { kind: 'wood', accent: 0xd39154 });
+    sign.position.set(0, 1.42, -0.28);
+    g.add(body, top, bell, bellBase, sign, makeStationBadge(style.label, style.color));
     node.glow = new THREE.PointLight(0xffc107, 0, 3);
     node.glow.position.set(0, 1.3, 0);
     g.add(node.glow);
@@ -565,9 +599,9 @@ function buildStation(st) {
     lid.position.y = 0.82;
     const knob = sph(0.06, 0x90a4ae, 8, 6);
     knob.position.y = 0.9;
-    g.add(bin, lid, knob);
+    g.add(bin, lid, knob, makeStationBadge(style.label, style.color));
   } else if (st.type === 'crate') {
-    const frame = box(0.96, 0.62, 0.96, 0x8d6e63);
+    const frame = box(0.96, 0.62, 0.96, 0x8d6e43, { kind: 'wood', accent: 0x563924 });
     frame.position.y = 0.31;
     const inner = box(0.8, 0.5, 0.8, 0x6d4c41);
     inner.position.y = 0.4;
@@ -583,47 +617,76 @@ function buildStation(st) {
     one.position.set(0, 0.68, 0);
     one.scale.setScalar(1.25);
     g.add(one);
+    const badge = makeStationBadge((ING[st.crate] && ING[st.crate].name[0]) || style.label, c);
+    g.add(badge);
   }
   return node;
 }
 
-function buildMap(layout) {
-  if (mapGroup) {
-    scene.remove(mapGroup);
-    mapGroup.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material && o.material.map) o.material.map.dispose();
-    });
-  }
+function disposeMap() {
+  if (!mapGroup) return;
+  environment.dispose();
+  scene.remove(mapGroup);
+  mapGroup.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.isSprite && o.material) {
+      if (o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  });
+  mapGroup = null;
   stationNodes.clear();
+}
+
+function buildMap(layout) {
+  disposeMap();
+  environmentProgress = 0;
   mapGroup = new THREE.Group();
   builtLayout = layout;
+  activeTheme = themeFor(layout.mapId);
+  document.body.dataset.mapTheme = activeTheme.id;
+  scene.background = new THREE.Color(activeTheme.sky);
+  scene.fog = new THREE.FogExp2(activeTheme.fog, activeTheme.fogDensity);
+  hemi.color.setHex(activeTheme.hemiSky);
+  hemi.groundColor.setHex(activeTheme.hemiGround);
+  hemi.intensity = activeTheme.hemiIntensity;
+  sun.color.setHex(activeTheme.sun);
+  sun.intensity = activeTheme.sunIntensity;
+  targetRing.material.color.setHex(activeTheme.target);
 
   const { w, h, cells } = layout;
+  const floorGeometry = new THREE.BoxGeometry(0.97, 0.1, 0.97);
+  const floorMaterials = [
+    mat(activeTheme.floorA, { kind: activeTheme.id === 'classic' ? 'tile' : 'noise', accent: activeTheme.grout }),
+    mat(activeTheme.floorB, { kind: activeTheme.id === 'classic' ? 'tile' : 'noise', accent: activeTheme.grout }),
+  ];
+  const floorMeshes = floorMaterials.map((material) => new THREE.InstancedMesh(floorGeometry, material, Math.ceil(w * h / 2)));
+  const floorCounts = [0, 0];
+  const dummy = new THREE.Object3D();
+  let wallCount = 0;
+  for (const cell of cells) if (cell === '#') wallCount++;
+  const wallGeometry = new THREE.BoxGeometry(1, 1.15, 1);
+  const wallMesh = new THREE.InstancedMesh(wallGeometry, mat(activeTheme.wall, { kind: activeTheme.id === 'split' ? 'metal' : 'noise', accent: activeTheme.wallAlt }), wallCount);
+  const trimGeometry = new THREE.BoxGeometry(1.03, 0.1, 1.03);
+  const trimMesh = new THREE.InstancedMesh(trimGeometry, mat(activeTheme.trim, { kind: activeTheme.id === 'ring' ? 'metal' : 'wood', accent: activeTheme.wallAlt }), wallCount);
+  wallMesh.castShadow = true; wallMesh.receiveShadow = true; trimMesh.castShadow = true;
+  let wallIndex = 0;
   for (let z = 0; z < h; z++) {
     for (let x = 0; x < w; x++) {
       const cell = cells[z * w + x];
-      // 地板（所有格子都铺）
-      const tile = box(0.995, 0.1, 0.995, (x + z) % 2 === 0 ? FLOOR_A : FLOOR_B);
-      tile.position.set(x + 0.5, -0.05, z + 0.5);
-      tile.receiveShadow = true;
-      tile.castShadow = false;
-      mapGroup.add(tile);
+      const parity = (x + z) & 1;
+      dummy.position.set(x + 0.5, -0.05, z + 0.5); dummy.updateMatrix();
+      floorMeshes[parity].setMatrixAt(floorCounts[parity]++, dummy.matrix);
       if (cell === '#') {
-        const wall = box(1, 1.15, 1, 0xb0613c);
-        wall.position.set(x + 0.5, 0.575, z + 0.5);
-        const trim = box(1.02, 0.1, 1.02, 0x8f4a2c);
-        trim.position.set(x + 0.5, 1.18, z + 0.5);
-        mapGroup.add(wall, trim);
+        dummy.position.set(x + 0.5, 0.575, z + 0.5); dummy.updateMatrix(); wallMesh.setMatrixAt(wallIndex, dummy.matrix);
+        dummy.position.set(x + 0.5, 1.18, z + 0.5); dummy.updateMatrix(); trimMesh.setMatrixAt(wallIndex, dummy.matrix);
+        wallIndex++;
       }
     }
   }
-  // 外围大地面
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mat(0x6b4a35));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(w / 2, -0.11, h / 2);
-  ground.receiveShadow = true;
-  mapGroup.add(ground);
+  floorMeshes.forEach((mesh, i) => { mesh.count = floorCounts[i]; mesh.receiveShadow = true; mapGroup.add(mesh); });
+  mapGroup.add(wallMesh, trimMesh);
+  environment.buildEnvironment(mapGroup, layout, activeTheme);
 
   // 站台
   for (const key in layout.stationAt) {
@@ -657,8 +720,8 @@ function fitCamera() {
   const { w, h } = builtLayout;
   const aspect = camera.aspect || 1;
   // 保证宽度方向完整可见：D 随地图宽与屏幕宽高比放大
-  const fitW = (w / 2 + 1.2) / Math.tan(THREE.MathUtils.degToRad(24)) / Math.max(0.55, aspect);
-  const fitH = h * 1.05;
+  const fitW = (w / 2 + 2.2) / Math.tan(THREE.MathUtils.degToRad(24)) / Math.max(0.55, aspect);
+  const fitH = (h + 2) * 1.02;
   const D = Math.max(fitW, fitH, 8.5);
   camera.position.set(w / 2, D * 0.86, h / 2 + D * 0.6);
   camera.lookAt(w / 2, 0, h / 2 + 0.2);
@@ -739,6 +802,12 @@ function applyStations(state) {
         node.iconReady.visible = false;
         node.iconBurnt.visible = false;
       }
+      if (has && perfNow >= node.nextFx) {
+        const pos = new THREE.Vector3(); node.group.getWorldPosition(pos); pos.y = 1.35;
+        if (dyn.phase === 'burnt') effects.emit('smoke', pos, { count: qualityTier === 'low' ? 1 : 2, rise: 0.7, life: 1.2, size: 1.3 });
+        else if (dyn.phase === 'cooking' || dyn.phase === 'ready') effects.emit('steam', pos, { count: 1, rise: 0.55, life: 0.9, size: 0.8 });
+        node.nextFx = perfNow + (qualityTier === 'low' ? 0.34 : 0.2);
+      }
     }
 
     // 水槽：脏盘堆 + 洗碗进度
@@ -755,6 +824,11 @@ function applyStations(state) {
       }
       if (state.plates && state.plates.washT > 0 && dirty > 0) {
         setBar(node.bar, state.plates.washT / 4, 0x4fc3f7);
+        if (perfNow >= node.nextFx) {
+          const pos = new THREE.Vector3(); node.group.getWorldPosition(pos); pos.y = 1;
+          effects.emit('bubble', pos, { count: 2, spread: 0.45, rise: 0.45, life: 0.75, size: 0.65 });
+          node.nextFx = perfNow + (qualityTier === 'low' ? 0.32 : 0.18);
+        }
       } else {
         setBar(node.bar, null);
       }
@@ -798,19 +872,22 @@ function applyPlayers(state, dt) {
     seen.add(id);
     let node = playerNodes.get(id);
     if (!node) {
-      const group = makeChef(p.color);
+      const group = makeChefModel(p.color, { box, cyl, sph, mat });
       const label = makeNameSprite(p.name, p.color);
       group.add(label);
       scene.add(group);
-      node = { group, render: { x: p.x, z: p.z }, target: { x: p.x, z: p.z }, label };
+      const yaw = p.face && (p.face.dx || p.face.dz) ? Math.atan2(p.face.dx, p.face.dz) : 0;
+      node = { group, render: { x: p.x, z: p.z }, target: { x: p.x, z: p.z }, label, state: p, yaw, targetYaw: yaw };
       playerNodes.set(id, node);
     }
+    node.state = p;
     node.target.x = p.x;
     node.target.z = p.z;
 
     // 手持物
     const cJson = p.carrying ? JSON.stringify(p.carrying) : '';
     if (cJson !== node.group.userData.carryingJson) {
+      if (node.group.userData.carryingJson !== '__none__') kickChef(node.group, 1);
       node.group.userData.carryingJson = cJson;
       const anchor = node.group.userData.carryAnchor;
       while (anchor.children.length) anchor.remove(anchor.children[0]);
@@ -823,18 +900,9 @@ function applyPlayers(state, dt) {
 
     // 朝向
     if (p.face && (p.face.dx || p.face.dz)) {
-      node.group.rotation.y = Math.atan2(p.face.dx, p.face.dz);
+      node.targetYaw = Math.atan2(p.face.dx, p.face.dz);
     }
 
-    // 工作动画（切菜/洗碗时身体起伏）
-    const ud = node.group.userData;
-    if (p.working) {
-      ud.body.position.y = 0.44 + Math.abs(Math.sin(perfNow * 9)) * 0.09;
-      ud.hatTop.position.y = 1.22 + Math.abs(Math.sin(perfNow * 9)) * 0.05;
-    } else {
-      ud.body.position.y = 0.44;
-      ud.hatTop.position.y = 1.22;
-    }
   }
   // 移除离开的玩家
   for (const [id, node] of playerNodes) {
@@ -894,6 +962,8 @@ function stepPrediction(dt) {
 function interpolatePlayers(dt) {
   const myId = parti.playerId;
   for (const [id, node] of playerNodes) {
+    const beforeX = node.render.x;
+    const beforeZ = node.render.z;
     if (id === myId && selfPos && latestState && latestState.phase === 'playing') {
       node.render.x = selfPos.x;
       node.render.z = selfPos.z;
@@ -910,6 +980,24 @@ function interpolatePlayers(dt) {
       }
     }
     node.group.position.set(node.render.x, 0, node.render.z);
+    const fallbackSpeed = Math.hypot(node.render.x - beforeX, node.render.z - beforeZ) / Math.max(dt, 0.001);
+    const source = id === myId && selfPos ? selfPos : node.state;
+    const hasVelocity = source && Number.isFinite(source.vx) && Number.isFinite(source.vz);
+    const motionSpeed = hasVelocity ? Math.hypot(source.vx, source.vz) : fallbackSpeed;
+    const yawDelta = Math.atan2(Math.sin(node.targetYaw - node.yaw), Math.cos(node.targetYaw - node.yaw));
+    node.yaw += yawDelta * (1 - Math.exp(-dt * 16));
+    node.group.rotation.y = node.yaw;
+    let stationType = null;
+    if (node.state && latestState) {
+      const target = facingTarget(latestState, node.state);
+      stationType = target && target.st.type;
+      if (node.state.working && stationType === 'board' && perfNow >= (node.nextWorkFx || 0)) {
+        const pos = new THREE.Vector3(node.render.x, 0.95, node.render.z);
+        effects.emit('crumb', pos, { count: 2, spread: 0.22, rise: 0.35, outward: 0.65, life: 0.48, size: 0.65 });
+        node.nextWorkFx = perfNow + (qualityTier === 'low' ? 0.28 : 0.16);
+      }
+    }
+    animateChefModel(node.group, node.state, { speed: motionSpeed }, perfNow, dt, stationType);
     // 手持物轻微浮动
     const anchor = node.group.userData.carryAnchor;
     if (anchor.children.length) anchor.position.y = 1.52 + Math.sin(perfNow * 2.4 + node.render.x) * 0.03;
@@ -1116,7 +1204,8 @@ function applyOrders(state) {
     if (!card) {
       const d = document.createElement('div');
       d.className = 'order-card';
-      d.innerHTML = `<div class="o-name">${o.name} · ${o.points}分</div>
+      const recipe = RECIPES.find((r) => recipeKey(r.items) === o.key);
+      d.innerHTML = `<div class="o-head"><span class="o-type">${recipe && recipe.cook ? '🍲' : '🥗'}</span><div class="o-name">${o.name}<small>${o.points}分</small></div></div>
         <div class="o-dots">${ingDotsHtml(o.key)}</div>
         <div class="o-bar"><i></i></div>`;
       el.orders.appendChild(d);
@@ -1163,9 +1252,10 @@ function applyHud(state) {
 const mapCardEls = new Map();
 function buildLobbyOnce() {
   for (const m of MAP_META) {
+    const theme = themeFor(m.id);
     const btn = document.createElement('button');
-    btn.className = 'map-card';
-    btn.innerHTML = `<div class="m-ico">${m.ico}</div><div class="m-name">${m.name}</div><div class="m-desc">${m.desc}</div>`;
+    btn.className = `map-card theme-${m.id}`;
+    btn.innerHTML = `<div class="m-preview"><i></i><i></i><i></i><span>${theme.icon}</span></div><div class="m-name">${m.name}</div><div class="m-theme">${theme.label}</div><div class="m-desc">${m.desc}</div>`;
     btn.onclick = () => { audio.playSfx('ui'); parti.action('selectMap', { mapId: m.id }); };
     el.mapCards.appendChild(btn);
     mapCardEls.set(m.id, btn);
@@ -1238,6 +1328,7 @@ function applyEnded(state) {
 function setPhase(phase, state) {
   if (phase === currentPhase) return;
   currentPhase = phase;
+  el.app.classList.toggle('gesture-locked', phase === 'playing' || phase === 'countdown');
   el.lobby.classList.toggle('hidden', phase !== 'lobby');
   el.ended.classList.toggle('hidden', phase !== 'ended');
   el.hud.classList.toggle('hidden', !(phase === 'playing' || phase === 'countdown'));
@@ -1250,6 +1341,14 @@ function setPhase(phase, state) {
     orderCards.clear();
   }
 }
+
+// iOS Safari 等浏览器有时不会只凭 touch-action/overflow 禁止长按菜单和
+// 页面橡皮筋滚动；仅在对局阶段拦截默认手势，保留大厅与结算页的纵向滚动。
+function preventGameBrowserGesture(e) {
+  if (el.app.classList.contains('gesture-locked')) e.preventDefault();
+}
+el.app.addEventListener('contextmenu', preventGameBrowserGesture);
+el.app.addEventListener('touchmove', preventGameBrowserGesture, { passive: false });
 
 // ---------------------------------------------------------------------------
 // parti 接线
@@ -1326,8 +1425,7 @@ parti.onState((state) => {
   if (!state.layout && builtLayout) {
     builtLayout = null;
     builtGameSeq = -1;
-    if (mapGroup) { scene.remove(mapGroup); mapGroup = null; }
-    stationNodes.clear();
+    disposeMap();
   }
   setPhase(state.phase, state);
   if (state.phase === 'lobby') applyLobby(state);
@@ -1344,10 +1442,22 @@ parti.onState((state) => {
 parti.onEvent('game:countdown', (p) => { toast(`地图：${p.mapName || ''}，各就各位！`); audio.playSfx('join'); });
 parti.onEvent('game:start', () => { toast('开工！🍳', 'good'); audio.playSfx('start'); });
 parti.onEvent('order:new', (p) => { toast(`新订单：${p.name}`); audio.playSfx('orderNew'); });
-parti.onEvent('order:served', (p) => { toast(`上菜成功 +${p.points + p.tip}（含小费 ${p.tip}）`, 'good'); audio.playSfx('served'); });
+parti.onEvent('order:served', (p) => {
+  toast(`上菜成功 +${p.points + p.tip}（含小费 ${p.tip}）`, 'good'); audio.playSfx('served');
+  for (const node of stationNodes.values()) if (node.type === 'window') {
+    const pos = new THREE.Vector3(); node.group.getWorldPosition(pos); pos.y = 1.25;
+    effects.burst('star', pos, 0xffdf55);
+  }
+});
 parti.onEvent('order:expired', (p) => { toast(`订单超时：${p.name}`, 'bad'); audio.playSfx('expired'); });
 parti.onEvent('pot:ready', () => { toast('汤煮好了，快装盘！', 'good'); audio.playSfx('potReady'); });
-parti.onEvent('pot:burnt', () => { toast('锅烧糊了！空手去倒掉', 'bad'); audio.playSfx('burnt'); });
+parti.onEvent('pot:burnt', () => {
+  toast('锅烧糊了！空手去倒掉', 'bad'); audio.playSfx('burnt');
+  for (const node of stationNodes.values()) if (node.type === 'stove') {
+    const pos = new THREE.Vector3(); node.group.getWorldPosition(pos); pos.y = 1.3;
+    effects.burst('smoke', pos, 0x292b31);
+  }
+});
 parti.onEvent('plate:dirty', () => { toast('脏盘子回到水槽了'); audio.playSfx('dirty'); });
 parti.onEvent('game:over', () => { audio.playSfx('over'); });
 parti.onEvent('player:joined', (p) => { toast(`${p.name} 加入了厨房`); audio.playSfx('join'); });
@@ -1555,6 +1665,17 @@ function frame(ts) {
   updateBubble();
   updateWorkSound(ts);
   updateWarningSounds(ts);
+  effects.update(dt);
+  let targetEnvironmentProgress = 0;
+  if (latestState && latestState.phase === 'playing') targetEnvironmentProgress = THREE.MathUtils.clamp((GAME_DURATION - (latestState.timeLeft || 0)) / GAME_DURATION, 0, 1);
+  else if (latestState && latestState.phase === 'ended') targetEnvironmentProgress = 1;
+  environmentProgress += (targetEnvironmentProgress - environmentProgress) * (1 - Math.exp(-dt * 2.4));
+  environment.updateEnvironment(environmentProgress, perfNow);
+  if (targetRing.visible) {
+    const pulse = 1 + Math.sin(perfNow * 5) * 0.07;
+    targetRing.scale.setScalar(pulse);
+    targetRing.rotation.z += dt * 0.55;
+  }
 
   // 灶台汤水翻滚等时间动画在 applyStations 中用 perfNow 驱动
   if (latestState && (latestState.phase === 'playing' || latestState.phase === 'countdown') && stationNodes.size) {

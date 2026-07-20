@@ -2,11 +2,11 @@
   "partiVersion": "0.1.0",
   "protocolVersion": 1,
   "id": "overcooked-party",
-  "name": "胡闹厨房派对",
-  "version": "1.2.0",
+  "name": "新手上厨",
+  "version": "1.3.0",
   "packageMode": "blob",
   "description": "Low-poly 3D 合作厨房：2-4 人切菜、煮汤、装盘、上菜、洗碗，十种菜谱三张地图挑战配合极限。",
-  "cover": "cover.png",
+  "cover": "cover-newbie-chefs.jpg",
   "tags": [
     "co-op",
     "3d"
