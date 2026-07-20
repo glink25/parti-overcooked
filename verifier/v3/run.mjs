@@ -65,6 +65,71 @@ function workerContract(file, label) {
 
 const def = workerContract(path.join(root, 'src/worker/index.js'), '源码');
 
+section('六张地图可玩性与连通性');
+{
+  const mapIds = ['classic', 'split', 'ring', 'snow', 'space', 'castle'];
+  const requiredIngredients = {
+    classic: ['tomato','onion','carrot','lettuce'], split: ['mushroom','potato','tomato','onion','carrot','lettuce'],
+    ring: ['tomato','onion','mushroom','lettuce','cucumber','carrot','potato'],
+    snow: ['potato','mushroom','cheese','meat','onion','lettuce','tomato'],
+    space: ['rice','carrot','onion','mushroom','meat','tomato','lettuce','cucumber','cheese'],
+    castle: ['carrot','onion','potato','cucumber','lettuce','tomato','meat','cheese','rice','mushroom'],
+  };
+  const neighbors = (x, z) => [[x+1,z],[x-1,z],[x,z+1],[x,z-1]];
+  const componentFrom = (layout, spawn) => {
+    const seen = new Set([`${spawn.x},${spawn.z}`]); const queue = [[spawn.x, spawn.z]];
+    while (queue.length) {
+      const [x, z] = queue.shift();
+      for (const [nx, nz] of neighbors(x, z)) {
+        const key = `${nx},${nz}`;
+        if (nx < 0 || nz < 0 || nx >= layout.w || nz >= layout.h || seen.has(key) || layout.cells[nz * layout.w + nx] !== '.') continue;
+        seen.add(key); queue.push([nx, nz]);
+      }
+    }
+    return seen;
+  };
+  const canUse = (component, station) => neighbors(station.x, station.z).some(([x,z]) => component.has(`${x},${z}`));
+
+  for (const mapId of mapIds) {
+    const ctx = makeCtx(def, { seed: 31 }); createRoom(def, ctx);
+    join(ctx, def, 'p2', 'P2'); join(ctx, def, 'p3', 'P3'); join(ctx, def, 'p4', 'P4');
+    act(ctx, def, 'host', 'selectMap', { mapId }); act(ctx, def, 'host', 'start');
+    const layout = ctx.state.layout;
+    ok(`${mapId}: 网格尺寸完整`, layout.cells.length === layout.w * layout.h);
+    ok(`${mapId}: 出生点按 1-4 编号`, layout.spawns.map((s) => s.slot).join(',') === '1,2,3,4');
+    const components = layout.spawns.map((spawn) => componentFrom(layout, spawn));
+    const stations = Object.values(layout.stationAt);
+    const functional = stations.filter((station) => station.type !== 'counter');
+    ok(`${mapId}: 所有功能工位至少可被一个出生区操作`, functional.every((station) => components.some((component) => canUse(component, station))));
+    const crates = stations.filter((s) => s.type === 'crate').map((s) => s.crate);
+    ok(`${mapId}: 订单食材箱完整`, requiredIngredients[mapId].every((g) => crates.includes(g)), crates.join(','));
+    for (const type of ['board','plates','sink','window','trash']) ok(`${mapId}: ${type} 可操作`, stations.some((s) => s.type === type && components.some((component) => canUse(component, s))));
+  }
+
+  const ctx = makeCtx(def, { seed: 37 }); createRoom(def, ctx); join(ctx, def, 'p2', 'P2');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'space' }); act(ctx, def, 'host', 'start');
+  const layout = ctx.state.layout; const outer = componentFrom(layout, layout.spawns[0]); const chamber = componentFrom(layout, layout.spawns[1]);
+  const stations = Object.values(layout.stationAt); const stoves = stations.filter((s) => s.type === 'stove');
+  ok('太空: 2人开局分属外围与中央舱', !outer.has(`${layout.spawns[1].x},${layout.spawns[1].z}`));
+  ok('太空: 中央玩家可操作全部灶台', stoves.length >= 3 && stoves.every((s) => canUse(chamber, s)));
+  ok('太空: 外围玩家可操作备餐与出菜工位', ['crate','board','plates','sink','window'].every((type) => stations.some((s) => s.type === type && canUse(outer, s))));
+  ok('太空: 存在内外双侧可操作的交接台', stations.some((s) => s.type === 'counter' && canUse(outer, s) && canUse(chamber, s)));
+  pump(ctx, 31);
+  const host = ctx.state.players.host; const cook = ctx.state.players.p2;
+  const prepAndPass = (crateX, crateZ, standX, standZ, faceX, faceZ) => {
+    Object.assign(host, { x: standX, z: standZ, face: { dx: faceX, dz: faceZ }, carrying: null }); act(ctx, def, 'host', 'interact');
+    Object.assign(host, { x: 3.5, z: 2.5, face: { dx: 0, dz: 1 } }); act(ctx, def, 'host', 'interact');
+    act(ctx, def, 'host', 'work', { on: true }); pump(ctx, 31); act(ctx, def, 'host', 'work', { on: false }); act(ctx, def, 'host', 'interact');
+    Object.assign(host, { x: 7.5, z: 2.5, face: { dx: 0, dz: 1 } }); act(ctx, def, 'host', 'interact');
+    Object.assign(cook, { x: 7.5, z: 4.5, face: { dx: 0, dz: -1 }, carrying: null }); act(ctx, def, 'p2', 'interact');
+    cook.face = { dx: -1, dz: 0 }; act(ctx, def, 'p2', 'interact');
+  };
+  prepAndPass(1, 1, 1.5, 2.5, 0, -1); // 米饭
+  prepAndPass(3, 8, 3.5, 7.5, 0, 1);  // 胡萝卜
+  prepAndPass(1, 4, 2.5, 4.5, -1, 0); // 洋葱
+  ok('太空: 外围备料可经交接台送入中央灶台', ctx.state.stations['6,4'].phase === 'cooking' && ctx.state.stations['6,4'].contents.length === 3);
+}
+
 // ---------------------------------------------------------------------------
 // 3. 移动、滑墙与客户端预测
 // ---------------------------------------------------------------------------
@@ -152,6 +217,7 @@ section('移动手感与碰撞');
   const ctx = makeCtx(def);
   createRoom(def, ctx);
   join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'classic' });
   act(ctx, def, 'host', 'start');
   pump(ctx, 31);
   ctx.state.layout = openWithPillar;
@@ -219,6 +285,7 @@ section('经典厨房：完整做菜流程');
   const ctx = makeCtx(def);
   createRoom(def, ctx);
   join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'classic' });
   act(ctx, def, 'host', 'start');
   ok('start 进入 countdown', ctx.state.phase === 'countdown');
 
@@ -229,6 +296,7 @@ section('经典厨房：完整做菜流程');
   ok('倒计时期间移动被忽略', ctx.state.players.host.x === before.x && ctx.state.players.host.z === before.z);
   pump(ctx, 26); // 共 31 tick ≈ 3.1s
   ok('倒计时结束进入 playing', ctx.state.phase === 'playing');
+  ctx.state.timeLeft = 10000; // 完整操作验证期间不让回合自然结束
   ok('game:start 广播', lastEvents(ctx, 'game:start').length === 1);
 
   const L = ctx.state.layout;
@@ -289,18 +357,19 @@ section('经典厨房：完整做菜流程');
   ok('首波订单已生成', ctx.state.orders.length >= 1);
 
   act(ctx, def, 'p2', 'interact'); // 装盘
-  ok('p2 端到番茄浓汤', ctx.state.players.p2.carrying?.k === 'dish' && ctx.state.players.p2.carrying.items.join('+') === 'tomato+tomato+tomato');
+  ok('p2 端到番茄浓汤', ctx.state.players.p2.carrying?.k === 'dish' && ctx.state.players.p2.carrying.items.every((item) => item.ingredient === 'tomato' && item.prep === 'chopped'));
   ok('锅恢复空闲', pot.phase === 'idle' && pot.contents.length === 0);
 
   // 测试布置：确保有番茄浓汤订单（模拟 Worker 可能生成的订单）
-  ctx.state.orders.push({ id: 'ox', key: 'tomato+tomato+tomato', name: '番茄浓汤', points: 20, t: 70, total: 80 });
+  ctx.state.orders.push({ id: 'ox', recipeId: 'tomato_soup', key: 'tomato:chopped+tomato:chopped+tomato:chopped', items: [{ ingredient: 'tomato', prep: 'chopped' }, { ingredient: 'tomato', prep: 'chopped' }, { ingredient: 'tomato', prep: 'chopped' }], name: '番茄浓汤', points: 20, t: 70, total: 80 });
   walkTo(ctx, def, 'p2', 11.5, 4.5);
   walkTo(ctx, def, 'p2', 11.5, 6.5);
   walkTo(ctx, def, 'p2', 7.5, 6.5);
   walkTo(ctx, def, 'p2', 7.5, 7.5, { dx: 0, dz: 1 });
   act(ctx, def, 'p2', 'interact'); // 上菜
   ok('上菜成功得分', ctx.state.score >= 20 && ctx.state.served === 1, 'score=' + ctx.state.score);
-  ok('订单被移除', !ctx.state.orders.some((o) => o.id === 'ox'));
+  ok('成功交付后结算个人贡献', ctx.state.players.host.contributionScore > 0 && ctx.state.players.p2.contributionScore > 0);
+  ok('匹配订单被移除', ctx.state.served === 1);
   ok('脏盘待返回', ctx.state.plates.due.length === 1);
   ok('order:served 广播', lastEvents(ctx, 'order:served').length === 1);
 
@@ -313,6 +382,7 @@ section('经典厨房：完整做菜流程');
   pump(ctx, 42);
   act(ctx, def, 'p2', 'work', { on: false });
   ok('洗碗完成', ctx.state.plates.dirty === 0 && ctx.state.plates.clean === 4, JSON.stringify(ctx.state.plates));
+  ok('洗盘贡献随干净盘保留', Array.isArray(ctx.state.plates.cleanCredits[0]) && ctx.state.plates.cleanCredits[0][0].points === 2);
 
   // 烧糊流程（测试布置：直接把锅设为烹饪中）
   pot.contents = ['onion', 'onion', 'onion'];
@@ -340,10 +410,36 @@ section('经典厨房：完整做菜流程');
   pot.phase = 'idle';
   ctx.state.players.host.carrying = { k: 'chopped', g: 'carrot' };
   act(ctx, def, 'host', 'interact');
-  ok('3 胡萝卜开煮（新菜谱）', pot.phase === 'cooking' && pot.contents.join(',') === 'carrot,carrot,carrot');
+  ok('3 胡萝卜开煮（新菜谱）', pot.phase === 'cooking' && pot.contents.length === 3 && pot.contents.every((item) => (item.ingredient || item) === 'carrot'));
   pot.contents = [];
   pot.phase = 'idle';
   ctx.state.players.host.carrying = null;
+
+  // 精细处理：米饭不可上砧板，也不能伪造为切碎状态；完整米饭可直接用于烩饭。
+  ctx.state.players.host.x = 1.5; ctx.state.players.host.z = 4.5; ctx.state.players.host.face = { dx: 0, dz: 1 };
+  ctx.state.players.host.carrying = { k: 'raw', g: 'rice' };
+  act(ctx, def, 'host', 'interact');
+  ok('米饭不可放上砧板切', ctx.state.players.host.carrying?.g === 'rice' && !ctx.state.stations['1,5'].item);
+  ctx.state.players.host.x = 10.5; ctx.state.players.host.z = 4.5; ctx.state.players.host.face = { dx: 0, dz: 1 };
+  ctx.state.players.host.carrying = { k: 'chopped', g: 'rice' };
+  act(ctx, def, 'host', 'interact');
+  ok('非法切碎米饭不能下锅', pot.contents.length === 0 && ctx.state.players.host.carrying?.g === 'rice');
+  pot.contents = [{ ingredient: 'carrot', prep: 'chopped' }, { ingredient: 'onion', prep: 'chopped' }];
+  ctx.state.players.host.carrying = { k: 'raw', g: 'rice' };
+  act(ctx, def, 'host', 'interact');
+  ok('完整米饭可直接完成黄金烩饭', pot.phase === 'cooking' && pot.contents.some((item) => item.ingredient === 'rice' && item.prep === 'whole'));
+  pot.contents = []; pot.phase = 'idle'; ctx.state.players.host.carrying = null;
+
+  // 同一种番茄在不同菜谱中处理要求不同，错误形态不能交付。
+  const saladOrder = { id: 'prep-order', recipeId: 'garden_salad', key: 'lettuce:chopped+tomato:whole', items: [{ ingredient: 'lettuce', prep: 'chopped' }, { ingredient: 'tomato', prep: 'whole' }], name: '田园沙拉', points: 16, t: 70, total: 80 };
+  ctx.state.orders.push(saladOrder);
+  ctx.state.players.host.x = 7.5; ctx.state.players.host.z = 7.5; ctx.state.players.host.face = { dx: 0, dz: 1 };
+  ctx.state.players.host.carrying = { k: 'dish', items: [{ ingredient: 'lettuce', prep: 'chopped' }, { ingredient: 'tomato', prep: 'chopped' }] };
+  act(ctx, def, 'host', 'interact');
+  ok('错误切碎状态不能完成完整番茄订单', ctx.state.orders.some((order) => order.id === 'prep-order') && ctx.state.players.host.carrying?.k === 'dish');
+  ctx.state.players.host.carrying = { k: 'dish', items: [{ ingredient: 'lettuce', prep: 'chopped' }, { ingredient: 'tomato', prep: 'whole' }] };
+  act(ctx, def, 'host', 'interact');
+  ok('正确混合处理状态可以上菜', !ctx.state.orders.some((order) => order.id === 'prep-order') && !ctx.state.players.host.carrying);
 
   // 订单过期扣分
   ctx.state.score = 3;
@@ -354,7 +450,7 @@ section('经典厨房：完整做菜流程');
   // 终局
   ctx.state.timeLeft = 0.25;
   pump(ctx, 3);
-  ok('时间到进入 ended', ctx.state.phase === 'ended');
+  ok('时间到进入 awards', ctx.state.phase === 'awards');
   ok('game:over 广播', lastEvents(ctx, 'game:over').length === 1);
 
   // rematch
@@ -427,7 +523,34 @@ section('环岛餐吧：全配方流程');
 
   ctx.state.timeLeft = 0.2;
   pump(ctx, 3);
-  ok('ring 可正常结束', ctx.state.phase === 'ended');
+  ok('ring 可正常结束', ctx.state.phase === 'awards');
+}
+
+section('多局派对与无尽怒气');
+{
+  const ctx = makeCtx(def, { seed: 19 });
+  createRoom(def, ctx); join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMode', { mode: 'party' }); act(ctx, def, 'host', 'start'); pump(ctx, 31);
+  const maps = [ctx.state.mapId];
+  for (let round = 1; round <= 2; round++) {
+    ctx.state.timeLeft = 0.05; pump(ctx, 1);
+    ok(`派对第${round}局进入局间结算`, ctx.state.phase === 'roundResult');
+    pump(ctx, 81); pump(ctx, 31); maps.push(ctx.state.mapId);
+    ok(`派对难度升至${round + 1}`, ctx.state.difficultyLevel === round + 1);
+  }
+  ok('派对三局地图不重复', new Set(maps).size === 3, maps.join(','));
+  ctx.state.timeLeft = 0.05; pump(ctx, 1);
+  ok('派对第三局后进入颁奖场', ctx.state.phase === 'awards');
+}
+{
+  const ctx = makeCtx(def, { seed: 23 });
+  createRoom(def, ctx); join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMode', { mode: 'endless' }); act(ctx, def, 'host', 'start'); pump(ctx, 31);
+  for (let i = 0; i < 4; i++) {
+    ctx.state.orders.push({ id: `rage${i}`, key: 'x', name: '测试怒气', points: 1, t: 0.01, total: 80 });
+    pump(ctx, 1);
+  }
+  ok('无尽模式怒气满100结束', ctx.state.rage === 100 && ctx.state.phase === 'awards');
 }
 
 // --- 边界：断线/离开 ---

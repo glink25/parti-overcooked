@@ -4,23 +4,25 @@ import * as THREE from 'three';
 import { daylightFor } from './environment.js';
 import { computeRenderPixelRatio, MAP_THEMES, qualitySettings, themeFor } from './themes.js';
 
-test('三张地图都有独立主题', () => {
-  assert.deepEqual(Object.keys(MAP_THEMES), ['classic', 'split', 'ring']);
-  assert.equal(new Set(Object.values(MAP_THEMES).map((theme) => theme.sky)).size, 3);
-  assert.equal(new Set(Object.values(MAP_THEMES).map((theme) => theme.floorA)).size, 3);
-  assert.equal(new Set(Object.values(MAP_THEMES).map((theme) => theme.decor)).size, 3);
+test('六张地图与颁奖广场都有主题', () => {
+  assert.deepEqual(Object.keys(MAP_THEMES), ['classic', 'split', 'ring', 'snow', 'space', 'castle', 'awards']);
+  assert.ok(new Set(Object.values(MAP_THEMES).map((theme) => theme.sky)).size >= 6);
+  assert.ok(new Set(Object.values(MAP_THEMES).map((theme) => theme.floorA)).size >= 6);
+  assert.ok(new Set(Object.values(MAP_THEMES).map((theme) => theme.decor)).size >= 6);
   for (const [id, theme] of Object.entries(MAP_THEMES)) {
     assert.equal(themeFor(id), theme);
     assert.ok(theme.label && theme.accent && theme.target);
   }
 });
 
-test('所有时间节点保持明亮且过渡连续', () => {
+test('各主题背景保持可读且过渡连续', () => {
   for (const theme of Object.values(MAP_THEMES)) {
     let previous = daylightFor(theme, 0);
     for (let i = 0; i <= 100; i++) {
       const value = daylightFor(theme, i / 100);
-      assert.ok(new THREE.Color(value.skyBottom).getHSL({}).l > 0.55);
+      const lightness = new THREE.Color(value.skyBottom).getHSL({}).l;
+      if (theme.id === 'space') assert.ok(lightness > 0.33 && lightness < 0.5);
+      else assert.ok(lightness > 0.4);
       assert.ok(value.sunIntensity >= 1.7);
       if (i > 0) {
         const a = new THREE.Color(value.skyTop); const b = new THREE.Color(previous.skyTop);
@@ -34,6 +36,18 @@ test('所有时间节点保持明亮且过渡连续', () => {
 
 test('未知地图稳定回退到经典主题', () => {
   assert.equal(themeFor('unknown'), MAP_THEMES.classic);
+});
+
+test('太空厨房保留深色星空但游戏表面足够明亮', () => {
+  const theme = MAP_THEMES.space;
+  const luminance = (hex) => {
+    const c = new THREE.Color(hex).convertSRGBToLinear();
+    return c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+  };
+  assert.ok(luminance(theme.floorA) > luminance(theme.sky) * 3);
+  assert.ok(luminance(theme.floorB) > luminance(theme.floorA) * 1.5);
+  assert.ok(luminance(theme.counterTop) > luminance(theme.cabinet) * 2);
+  assert.ok(theme.hemiIntensity >= 1.1 && theme.sunIntensity >= 1.9 && theme.fogDensity <= 0.006);
 });
 
 test('低画质严格限制渲染预算', () => {

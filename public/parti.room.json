@@ -3,9 +3,9 @@
   "protocolVersion": 1,
   "id": "overcooked-party",
   "name": "新手上厨",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "packageMode": "blob",
-  "description": "Low-poly 3D 合作厨房：2-4 人切菜、煮汤、装盘、上菜、洗碗，十种菜谱三张地图挑战配合极限。",
+  "description": "Low-poly 3D 合作厨房派对：2-4 人挑战三局派对或怒气无尽模式，18 道菜谱、6 张地图。",
   "cover": "cover-newbie-chefs.jpg",
   "tags": [
     "co-op",
@@ -35,8 +35,8 @@
     "sensors": []
   },
   "actions": {
-    "selectMap": {
-      "payload": "{ mapId: 'classic' | 'split' | 'ring' }"
+    "selectMode": {
+      "payload": "{ mode: 'party' | 'endless' }"
     },
     "start": {},
     "rematch": {},

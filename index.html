@@ -59,8 +59,18 @@
   }
   @keyframes pop-in { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .order-card .o-name { font-weight: 800; font-size: 14px; white-space: nowrap; }
-  .order-card .o-dots { display: flex; gap: 3px; margin: 4px 0 5px; }
-  .order-card .o-dots i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(0,0,0,.25); display: block; }
+  .order-card .o-dots { display: flex; gap: 4px; margin: 4px 0 5px; }
+  .order-card .o-dots i {
+    width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(0,0,0,.32);
+    display: grid; place-items: center; color: #fff; font-size: 11px; font-style: normal; font-weight: 900;
+    line-height: 1; text-shadow: 0 1px 1px rgba(0,0,0,.95), 1px 0 1px rgba(0,0,0,.7), -1px 0 1px rgba(0,0,0,.7);
+    position: relative;
+  }
+  .order-card .o-dots i b {
+    position: absolute; right: -5px; bottom: -5px; min-width: 13px; height: 13px; padding: 0 2px;
+    display: grid; place-items: center; border-radius: 5px; border: 1px solid #4b2f27;
+    background: #fff8e7; color: #4b2f27; font-size: 8px; line-height: 1; text-shadow: none;
+  }
   .order-card .o-bar { height: 7px; border-radius: 4px; background: #e0d5c2; overflow: hidden; }
   .order-card .o-bar i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
   .order-card.urgent { border-color: var(--bad); }
@@ -156,6 +166,22 @@
   .stat .k { font-size: 12px; font-weight: 700; color: #8d6e63; }
   .stat.hero .v { color: var(--accent); font-size: 34px; }
   #end-btns { display: flex; gap: 12px; }
+  #round-result .panel { max-width: 560px; }
+  #round-board, #award-board { width: 100%; display: grid; gap: 7px; }
+  .rank-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 9px; align-items: center; background: rgba(255,255,255,.78); border: 2px solid #4b2f27; border-radius: 11px; padding: 7px 11px; font-weight: 800; }
+  .rank-row i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 7px; border: 2px solid rgba(0,0,0,.25); }
+  .rank-player { min-width: 0; }
+  .rank-name { display: block; }
+  .rank-title { display: block; margin: 3px 0 0 25px; color: #9a5b34; font-size: 11px; line-height: 1.25; font-weight: 800; white-space: normal; }
+  .rank-title.rare { color: #c17800; text-shadow: 0 1px #fff3b0; }
+  .result-comment { width: 100%; text-align: center; border: 2px solid #d7a55d; border-radius: 13px; padding: 9px 12px; background: linear-gradient(145deg, #fffaf0, #ffe6b6); }
+  .result-comment.rare { border-color: #f2a900; background: linear-gradient(120deg, #fff4ae, #ffd7a8, #fff4ae); }
+  .result-comment strong { display: block; font-size: 18px; line-height: 1.25; }
+  .result-comment span { display: block; margin-top: 3px; color: #825b45; font-size: 12px; font-weight: 700; line-height: 1.3; }
+  #awards-hud { position: absolute; top: 72px; left: 14px; width: min(330px, 43vw); pointer-events: none; }
+  #awards-hud .panel { padding: 16px; gap: 9px; align-items: stretch; }
+  #awards-actions { position: absolute; left: 14px; bottom: 18px; display: flex; gap: 9px; pointer-events: auto; }
+  #mode-cards { display: flex; gap: 12px; }
 
   /* ---------- 触屏控件 ---------- */
   #touch-ui { position: absolute; inset: 0; pointer-events: none; }
@@ -230,7 +256,7 @@
   .o-type { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 9px; background: #ffe1a6; font-size: 16px; }
   .order-card .o-name { display: flex; flex-direction: column; line-height: 1.05; }
   .order-card .o-name small { color: #a1603d; font-size: 10px; margin-top: 3px; }
-  .order-card .o-dots i { width: 14px; height: 14px; box-shadow: inset -2px -2px 0 rgba(0,0,0,.12); }
+  .order-card .o-dots i { width: 20px; height: 20px; box-shadow: inset -2px -2px 0 rgba(0,0,0,.12); }
   .order-card.urgent { animation: order-shake .55s ease-in-out infinite alternate; background: #fff0e9; }
   @keyframes order-shake { from { transform: rotate(-.5deg); } to { transform: rotate(.5deg) scale(1.015); } }
   .overlay { background: radial-gradient(circle at 50% 30%, rgba(113,77,55,.5), rgba(26,18,25,.9)); }
@@ -264,6 +290,12 @@
     #orders { top: calc(7px + env(safe-area-inset-top, 0px)); gap: 5px; max-width: 68vw; flex-wrap: nowrap; overflow: hidden; }
     .order-card { min-width: 92px; padding: 5px 7px 7px; }
     .order-card .o-name { font-size: 11px; } .o-type { width: 22px; height: 22px; font-size: 13px; }
+    .order-card .o-dots { gap: 2px; }
+    .order-card .o-dots i { width: 18px; height: 18px; font-size: 10px; }
+    #awards-hud { top: 48px; left: 10px; width: calc(100vw - 20px); max-height: calc(100vh - 138px); overflow-y: auto; }
+    #awards-actions { left: 50%; transform: translateX(-50%); bottom: 12px; white-space: nowrap; }
+    #awards-actions .big-btn, #awards-actions .ghost-btn { padding: 9px 16px; font-size: 14px; }
+    .result-comment strong { font-size: 16px; }
     #hint { display: none; }
   }
 </style>
@@ -277,6 +309,8 @@
     <div id="hud-tl">
       <span class="chip" id="time-chip">⏱ <b id="time-val">3:00</b></span>
       <span class="chip" id="score-chip">⭐ <b id="score-val">0</b></span>
+      <span class="chip" id="round-chip">🎯 <b id="round-val">1/3</b></span>
+      <span class="chip hidden" id="rage-chip">😡 <b id="rage-val">0/100</b></span>
       <div id="hud-sub">
         <span class="chip">上菜 <b id="served-val">0</b></span>
         <span class="chip">超时 <b id="expired-val">0</b></span>
@@ -293,12 +327,19 @@
     <div class="panel">
       <h1>胡闹<span class="flame">厨房</span>派对</h1>
       <div class="sub">2-4 人合作 · 切菜 · 煮汤 · 装盘 · 上菜 · 洗碗</div>
-      <div id="map-cards"></div>
+      <div id="mode-cards"></div>
       <div id="lobby-players"></div>
       <button class="big-btn" id="start-btn">开火！</button>
       <div class="note" id="lobby-note"></div>
     </div>
   </div>
+
+  <div id="round-result" class="overlay hidden">
+    <div class="panel"><h2 id="round-title">🍽️ 本局结束</h2><div id="round-comment" class="result-comment hidden"></div><div id="round-board"></div><div class="note" id="round-next"></div></div>
+  </div>
+
+  <div id="awards-hud" class="hidden"><div class="panel"><h2>🏆 派对排行榜</h2><div id="award-total"></div><div id="final-comment" class="result-comment hidden"></div><div id="award-board"></div></div></div>
+  <div id="awards-actions" class="hidden"><button class="big-btn" id="award-rematch-btn">再来一场</button><button class="ghost-btn" id="award-lobby-btn">返回大厅</button></div>
 
   <div id="ended" class="overlay hidden">
     <div class="panel">

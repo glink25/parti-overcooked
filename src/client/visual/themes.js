@@ -46,6 +46,44 @@ export const MAP_THEMES = {
   },
 };
 
+MAP_THEMES.snow = {
+  id: 'snow', label: '雪山餐车', icon: '❄️', decor: 'snow', animationSpeed: 0.78,
+  sky: 0x8bd5f5, fog: 0xdceffa, ground: 0xeaf7ff, floorA: 0xd9f1ff, floorB: 0xffffff, grout: 0xaacde0,
+  wall: 0x4f8fc9, wallAlt: 0x89c7ed, trim: 0xeaf8ff, cabinet: 0x547fa7, cabinetDark: 0x34546f,
+  counterTop: 0xeefaff, metal: 0xb9d4df, accent: 0xffa43d, target: 0x78ddff,
+  hemiSky: 0xf6fcff, hemiGround: 0x9fb7c5, hemiIntensity: 1.2, sun: 0xffefd0, sunIntensity: 1.95, fogDensity: 0.009,
+  daylight: {
+    noon: { skyTop: 0x72c9ef, skyBottom: 0xf4fbff, fog: 0xdceffa, sun: 0xfff5dc, hemiSky: 0xffffff, hemiGround: 0xabc5d2, sunIntensity: 2, hemiIntensity: 1.24 },
+    afternoon: { skyTop: 0x8ac9e8, skyBottom: 0xffe3c4, fog: 0xe7dfd7, sun: 0xffcc88, hemiSky: 0xf6eddf, hemiGround: 0x9eb6c3, sunIntensity: 1.87, hemiIntensity: 1.2 },
+    party: { skyTop: 0x718db9, skyBottom: 0xffb28d, fog: 0xcdbec0, sun: 0xffa85f, hemiSky: 0xe7d9df, hemiGround: 0x8298ad, sunIntensity: 1.75, hemiIntensity: 1.16 },
+  },
+};
+MAP_THEMES.space = {
+  id: 'space', label: '星际厨房', icon: '🚀', decor: 'space', animationSpeed: 0.55,
+  sky: 0x202653, fog: 0x6576a0, ground: 0x7783a8, floorA: 0x7788b5, floorB: 0xa5b2d0, grout: 0x4c587d,
+  wall: 0x6878a7, wallAlt: 0x91a8ce, trim: 0x62edf2, cabinet: 0x6476a5, cabinetDark: 0x3d4d79,
+  counterTop: 0xd1edf2, metal: 0xaebdca, accent: 0xe877e9, target: 0x62f2e8,
+  hemiSky: 0xe4ecff, hemiGround: 0x7180a6, hemiIntensity: 1.18, sun: 0xdaf7ff, sunIntensity: 2.04, fogDensity: 0.006,
+  daylight: {
+    noon: { skyTop: 0x202653, skyBottom: 0x7b8fbd, fog: 0x6576a0, sun: 0xdaf7ff, hemiSky: 0xe4ecff, hemiGround: 0x7180a6, sunIntensity: 2.08, hemiIntensity: 1.2 },
+    afternoon: { skyTop: 0x292b60, skyBottom: 0x9296c7, fog: 0x747aa6, sun: 0xe8dcff, hemiSky: 0xeee9ff, hemiGround: 0x7c78a5, sunIntensity: 2.02, hemiIntensity: 1.18 },
+    party: { skyTop: 0x35265e, skyBottom: 0xb383bd, fog: 0x88759e, sun: 0xffd2f2, hemiSky: 0xffe9fa, hemiGround: 0x846f9b, sunIntensity: 1.94, hemiIntensity: 1.16 },
+  },
+};
+MAP_THEMES.castle = {
+  id: 'castle', label: '皇家宴会厅', icon: '🏰', decor: 'castle', animationSpeed: 0.86,
+  sky: 0x82acd1, fog: 0xc8c2b2, ground: 0x63815a, floorA: 0xbba47b, floorB: 0xd8c59b, grout: 0x756653,
+  wall: 0x847568, wallAlt: 0xb09c82, trim: 0x702f3b, cabinet: 0x68422f, cabinetDark: 0x39251f,
+  counterTop: 0xcab88f, metal: 0xb99747, accent: 0xd7a83f, target: 0xffd65c,
+  hemiSky: 0xffedcf, hemiGround: 0x65755d, hemiIntensity: 1.15, sun: 0xffd79a, sunIntensity: 1.92, fogDensity: 0.008,
+  daylight: {
+    noon: { skyTop: 0x77acd8, skyBottom: 0xe9e2cd, fog: 0xd5d0c3, sun: 0xffebc3, hemiSky: 0xfff4df, hemiGround: 0x708268, sunIntensity: 1.98, hemiIntensity: 1.2 },
+    afternoon: { skyTop: 0x8aa4bf, skyBottom: 0xf2c895, fog: 0xd4bfa5, sun: 0xffbf72, hemiSky: 0xffe3c2, hemiGround: 0x68755d, sunIntensity: 1.86, hemiIntensity: 1.16 },
+    party: { skyTop: 0x736f8d, skyBottom: 0xd98170, fog: 0xb99a8c, sun: 0xff9857, hemiSky: 0xe8c0b0, hemiGround: 0x595b4f, sunIntensity: 1.75, hemiIntensity: 1.12 },
+  },
+};
+MAP_THEMES.awards = { ...MAP_THEMES.classic, id: 'awards', label: '庆典广场', icon: '🏆', decor: 'garden', accent: 0xffc531 };
+
 export function themeFor(mapId) {
   return MAP_THEMES[mapId] || MAP_THEMES.classic;
 }

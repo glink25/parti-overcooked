@@ -1,5 +1,14 @@
 {
   "phase": "playing",
+  "mode": "party",
+  "roundIndex": 2,
+  "difficultyLevel": 2,
+  "sessionScore": 46,
+  "roundScore": 46,
+  "roundServed": 2,
+  "roundExpired": 0,
+  "rage": 0,
+  "rageMax": 100,
   "gameSeq": 1,
   "mapId": "classic",
   "hostId": "host",
@@ -384,8 +393,8 @@
       "item": {
         "k": "dish",
         "items": [
-          "lettuce",
-          "tomato"
+          { "ingredient": "lettuce", "prep": "chopped" },
+          { "ingredient": "tomato", "prep": "whole" }
         ]
       }
     },
@@ -413,17 +422,17 @@
     },
     "10,5": {
       "contents": [
-        "tomato",
-        "tomato",
-        "tomato"
+        { "ingredient": "tomato", "prep": "chopped" },
+        { "ingredient": "tomato", "prep": "chopped" },
+        { "ingredient": "tomato", "prep": "chopped" }
       ],
       "phase": "cooking",
       "t": 5
     },
     "12,5": {
       "contents": [
-        "carrot",
-        "carrot"
+        { "ingredient": "carrot", "prep": "chopped" },
+        { "ingredient": "carrot", "prep": "chopped" }
       ],
       "phase": "idle",
       "t": 0
@@ -444,7 +453,9 @@
   "orders": [
     {
       "id": "o1",
-      "key": "tomato+tomato+tomato",
+      "recipeId": "tomato_soup",
+      "key": "tomato:chopped+tomato:chopped+tomato:chopped",
+      "items": [{ "ingredient": "tomato", "prep": "chopped" }, { "ingredient": "tomato", "prep": "chopped" }, { "ingredient": "tomato", "prep": "chopped" }],
       "name": "番茄浓汤",
       "points": 20,
       "t": 62,
@@ -452,7 +463,9 @@
     },
     {
       "id": "o2",
-      "key": "lettuce+tomato",
+      "recipeId": "garden_salad",
+      "key": "lettuce:chopped+tomato:whole",
+      "items": [{ "ingredient": "lettuce", "prep": "chopped" }, { "ingredient": "tomato", "prep": "whole" }],
       "name": "田园沙拉",
       "points": 16,
       "t": 41,
@@ -460,7 +473,9 @@
     },
     {
       "id": "o3",
-      "key": "carrot+carrot+carrot",
+      "recipeId": "carrot_soup",
+      "key": "carrot:chopped+carrot:chopped+carrot:chopped",
+      "items": [{ "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "carrot", "prep": "chopped" }],
       "name": "胡萝卜浓汤",
       "points": 22,
       "t": 73,
@@ -468,7 +483,9 @@
     },
     {
       "id": "o4",
-      "key": "carrot+lettuce",
+      "recipeId": "crisp_salad",
+      "key": "carrot:chopped+lettuce:whole",
+      "items": [{ "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "lettuce", "prep": "whole" }],
       "name": "爽脆沙拉",
       "points": 18,
       "t": 55,

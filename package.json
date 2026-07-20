@@ -1,14 +1,15 @@
 {
   "name": "parti-overcooked",
   "private": true,
-  "version": "1.3.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Low-poly 3D co-op cooking chaos room for Parti (2-4 players)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test:visual": "node --test src/client/visual/*.test.mjs",
-    "verify": "npm run test:visual && node verifier/v3/run.mjs"
+    "test:accolades": "node --test src/worker/accolades.test.mjs",
+    "verify": "npm run test:visual && npm run test:accolades && node verifier/v3/run.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

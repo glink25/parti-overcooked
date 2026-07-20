@@ -7,43 +7,57 @@ import * as THREE from 'three';
 import demoStateJson from './demoState.json';
 import { createAudioEngine, orderWarningLevel, potWarningLevel } from './audio.js';
 import { PLAYER_R, reconcilePrediction, stepMovement } from './movement.js';
+import { cameraPoses, countdownIntroProgress, lerpCameraPose } from './visual/camera.js';
 import { animateChefModel, kickChef, makeChefModel } from './visual/chef.js';
 import { createEnvironmentController } from './visual/environment.js';
 import { createEffectSystem } from './visual/effects.js';
 import { createMaterialSystem } from './visual/materials.js';
+import { ingredientBadge, plateStationState } from './visual/orders.js';
 import { computeRenderPixelRatio, detectQualityTier, qualitySettings, themeFor } from './visual/themes.js';
 
 // ---------------------------------------------------------------------------
 // 常量（与 worker 约定的展示层数据）
 // ---------------------------------------------------------------------------
 const ING = {
-  tomato:   { color: 0xe53935, name: '番茄' },
-  onion:    { color: 0xd9a7d8, name: '洋葱' },
-  mushroom: { color: 0xc8a582, name: '菌菇' },
-  lettuce:  { color: 0x7cb342, name: '生菜' },
-  cucumber: { color: 0x2e7d32, name: '黄瓜' },
-  carrot:   { color: 0xf57c00, name: '胡萝卜' },
-  potato:   { color: 0xd9b382, name: '土豆' },
+  tomato: { color: 0xe53935, name: '番茄', choppable: true }, onion: { color: 0xd9a7d8, name: '洋葱', choppable: true },
+  mushroom: { color: 0xc8a582, name: '菌菇', choppable: true }, lettuce: { color: 0x7cb342, name: '生菜', choppable: true },
+  cucumber: { color: 0x2e7d32, name: '黄瓜', choppable: true }, carrot: { color: 0xf57c00, name: '胡萝卜', choppable: true },
+  potato: { color: 0xd9b382, name: '土豆', choppable: true }, meat: { color: 0xb94c55, name: '肉', choppable: true },
+  cheese: { color: 0xffca3a, name: '奶酪', choppable: true }, rice: { color: 0xf4efe4, name: '米饭', choppable: false },
 };
+const whole = (ingredient) => ({ ingredient, prep: 'whole' });
+const chopped = (ingredient) => ({ ingredient, prep: 'chopped' });
 
 // 配方目录（与 worker 一致，仅用于展示与交互预演）
 const RECIPES = [
-  { id: 'tomato_soup',   name: '番茄浓汤',   items: ['tomato', 'tomato', 'tomato'],    cook: true,  points: 20 },
-  { id: 'onion_soup',    name: '洋葱浓汤',   items: ['onion', 'onion', 'onion'],       cook: true,  points: 20 },
-  { id: 'carrot_soup',   name: '胡萝卜浓汤', items: ['carrot', 'carrot', 'carrot'],    cook: true,  points: 22 },
-  { id: 'potato_soup',   name: '土豆浓汤',   items: ['potato', 'potato', 'potato'],    cook: true,  points: 22 },
-  { id: 'mushroom_soup', name: '菌菇浓汤',   items: ['mushroom', 'mushroom', 'onion'], cook: true,  points: 24 },
-  { id: 'garden_stew',   name: '田园炖菜',   items: ['carrot', 'onion', 'potato'],     cook: true,  points: 28 },
-  { id: 'garden_salad',  name: '田园沙拉',   items: ['lettuce', 'tomato'],             cook: false, points: 16 },
-  { id: 'crisp_salad',   name: '爽脆沙拉',   items: ['carrot', 'lettuce'],             cook: false, points: 18 },
-  { id: 'deluxe_salad',  name: '豪华沙拉',   items: ['cucumber', 'lettuce', 'tomato'], cook: false, points: 22 },
-  { id: 'rainbow_salad', name: '彩虹沙拉',   items: ['carrot', 'cucumber', 'lettuce'], cook: false, points: 24 },
+  { id: 'tomato_soup', name: '番茄浓汤', items: [chopped('tomato'),chopped('tomato'),chopped('tomato')], cook: true, points: 20 },
+  { id: 'onion_soup', name: '洋葱浓汤', items: [chopped('onion'),chopped('onion'),chopped('onion')], cook: true, points: 20 },
+  { id: 'carrot_soup', name: '胡萝卜浓汤', items: [chopped('carrot'),chopped('carrot'),chopped('carrot')], cook: true, points: 22 },
+  { id: 'potato_soup', name: '土豆浓汤', items: [chopped('potato'),chopped('potato'),chopped('potato')], cook: true, points: 22 },
+  { id: 'mushroom_soup', name: '菌菇浓汤', items: [chopped('mushroom'),chopped('mushroom'),chopped('onion')], cook: true, points: 24 },
+  { id: 'garden_stew', name: '田园炖菜', items: [whole('carrot'),chopped('onion'),chopped('potato')], cook: true, points: 28 },
+  { id: 'garden_salad', name: '田园沙拉', items: [chopped('lettuce'),whole('tomato')], cook: false, points: 16 },
+  { id: 'crisp_salad', name: '爽脆沙拉', items: [chopped('carrot'),whole('lettuce')], cook: false, points: 18 },
+  { id: 'deluxe_salad', name: '豪华沙拉', items: [chopped('cucumber'),chopped('lettuce'),whole('tomato')], cook: false, points: 22 },
+  { id: 'rainbow_salad', name: '彩虹沙拉', items: [chopped('carrot'),chopped('cucumber'),whole('lettuce')], cook: false, points: 24 },
+  { id: 'meat_sauce_soup', name: '肉酱浓汤', items: [chopped('meat'),chopped('tomato'),chopped('onion')], cook: true, points: 30 },
+  { id: 'cheese_potato_soup', name: '芝士土豆汤', items: [whole('cheese'),chopped('potato'),chopped('onion')], cook: true, points: 30 },
+  { id: 'mushroom_meat_soup', name: '蘑菇肉汤', items: [chopped('meat'),chopped('mushroom'),whole('onion')], cook: true, points: 32 },
+  { id: 'golden_risotto', name: '黄金烩饭', items: [whole('rice'),chopped('carrot'),chopped('onion')], cook: true, points: 32 },
+  { id: 'mushroom_risotto', name: '菌菇烩饭', items: [whole('rice'),chopped('mushroom'),chopped('onion')], cook: true, points: 32 },
+  { id: 'cheese_salad', name: '芝士沙拉', items: [whole('cheese'),chopped('lettuce'),whole('tomato')], cook: false, points: 26 },
+  { id: 'power_salad', name: '能量沙拉', items: [chopped('meat'),whole('lettuce'),chopped('cucumber')], cook: false, points: 30 },
+  { id: 'party_platter', name: '派对拼盘', items: [whole('cheese'),chopped('meat'),whole('rice')], cook: false, points: 34 },
 ];
 const COOKABLE = new Set();
-for (const r of RECIPES) if (r.cook) for (const g of r.items) COOKABLE.add(g);
-function recipeKey(items) { return items.slice().sort().join('+'); }
+for (const r of RECIPES) if (r.cook) for (const item of r.items) COOKABLE.add(item.ingredient);
+function normalizedRequirement(item) {
+  if (typeof item === 'string') return { ingredient: item, prep: 'chopped' };
+  return { ingredient: item.ingredient || item.g, prep: item.prep || (item.k === 'chopped' ? 'chopped' : 'whole') };
+}
+function recipeKey(items) { return items.map((item) => { const r = normalizedRequirement(item); return `${r.ingredient}:${r.prep}`; }).sort().join('+'); }
 // 多重集合工具：have 是否为 need 的子集 / need 比 have 多哪些
-function countMap(arr) { const m = {}; for (const x of arr) m[x] = (m[x] || 0) + 1; return m; }
+function countMap(arr) { const m = {}; for (const x of arr) { const k = recipeKey([x]); m[k] = (m[k] || 0) + 1; } return m; }
 function isSubset(have, need) {
   const h = countMap(have); const n = countMap(need);
   for (const k in h) if ((n[k] || 0) < h[k]) return false;
@@ -51,9 +65,10 @@ function isSubset(have, need) {
 }
 function missingItems(have, need) {
   const h = countMap(have); const out = [];
-  for (const g of need) {
-    if ((h[g] || 0) > 0) h[g] -= 1;
-    else out.push(g);
+  for (const item of need) {
+    const k = recipeKey([item]);
+    if ((h[k] || 0) > 0) h[k] -= 1;
+    else out.push(normalizedRequirement(item));
   }
   return out;
 }
@@ -62,6 +77,9 @@ const MAP_META = [
   { id: 'classic', name: '经典厨房', ico: '🍳', desc: '左右对称的新手厨房，动线宽敞，适合磨合配合。' },
   { id: 'split',   name: '一线天',   ico: '🧱', desc: '台面高墙把厨房劈成两半，只有一条通道，记得隔空递菜！' },
   { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '灶台集中在中央环岛，菜谱齐备，订单更密更考验分工。' },
+  { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '狭长双工作区与中央交接台。' },
+  { id: 'space', name: '太空厨房', ico: '🚀', desc: '外围备料、中央烹饪，通过隔离舱交接台协作。' },
+  { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '双备餐区围绕皇家烹饪中心。' },
 ];
 
 const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -111,14 +129,18 @@ const el = {
   hud: $('hud'),
   timeVal: $('time-val'), timeChip: $('time-chip'),
   scoreVal: $('score-val'), servedVal: $('served-val'), expiredVal: $('expired-val'),
+  roundVal: $('round-val'), rageChip: $('rage-chip'), rageVal: $('rage-val'),
   orders: $('orders'),
   carryChip: $('carry-chip'),
   hint: $('hint'),
   countdown: $('countdown'), countdownNum: $('countdown-num'),
-  lobby: $('lobby'), mapCards: $('map-cards'), lobbyPlayers: $('lobby-players'),
+  lobby: $('lobby'), modeCards: $('mode-cards'), lobbyPlayers: $('lobby-players'),
   startBtn: $('start-btn'), lobbyNote: $('lobby-note'),
   ended: $('ended'), endStats: $('end-stats'), endNote: $('end-note'),
   rematchBtn: $('rematch-btn'), tolobbyBtn: $('tolobby-btn'),
+  roundResult: $('round-result'), roundTitle: $('round-title'), roundComment: $('round-comment'), roundBoard: $('round-board'), roundNext: $('round-next'),
+  awardsHud: $('awards-hud'), awardBoard: $('award-board'), awardTotal: $('award-total'), finalComment: $('final-comment'), awardsActions: $('awards-actions'),
+  awardRematchBtn: $('award-rematch-btn'), awardLobbyBtn: $('award-lobby-btn'),
   touchUi: $('touch-ui'), joy: $('joy'), joyKnob: $('joy-knob'),
   btnInteract: $('btn-interact'), btnWork: $('btn-work'),
   audioToggle: $('audio-toggle'),
@@ -186,6 +208,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x3a2418);
 
 const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
+let introCountdownValue = 0;
+let introCountdownReceivedAt = 0;
 
 const hemi = new THREE.HemisphereLight(0xfff4e0, 0x8a6a55, 1.05);
 scene.add(hemi);
@@ -335,7 +359,8 @@ function makePlateMesh(items) {
   plate.position.y = 0.03;
   grp.add(plate);
   if (items && items.length) {
-    items.forEach((g, i) => {
+    items.forEach((item, i) => {
+      const g = normalizedRequirement(item).ingredient;
       const blob = sph(0.09, ING[g] ? ING[g].color : 0xcccccc, 8, 6);
       blob.scale.y = 0.6;
       const a = (i / items.length) * Math.PI * 2;
@@ -444,12 +469,14 @@ let builtLayout = null;
 let environmentProgress = 0;
 const stationNodes = new Map(); // key 'x,z' -> { group, dyn… }
 let activeTheme = themeFor('classic');
+function cabinetMaterialKind() { return activeTheme.id === 'split' || activeTheme.id === 'space' || activeTheme.id === 'snow' ? 'metal' : 'wood'; }
+function floorMaterialKind() { return activeTheme.id === 'classic' || activeTheme.id === 'castle' ? 'tile' : (activeTheme.id === 'space' ? 'metal' : 'noise'); }
 
 const STATION_STYLE = {
   counter: { color: 0x9b6a4d, label: '' },
   board: { color: 0xf0a83d, label: '切' },
   stove: { color: 0xe64a3c, label: '煮' },
-  sink: { color: 0x35a9d6, label: '洗' },
+  sink: { color: 0x35a9d6, label: '碗' },
   plates: { color: 0xf4f0dc, label: '盘' },
   window: { color: 0xffc42d, label: '菜' },
   trash: { color: 0x607078, label: '弃' },
@@ -473,7 +500,7 @@ function makeStationBadge(text, color) {
 function addCabinetDetails(g, color) {
   const kick = box(0.86, 0.08, 0.06, activeTheme.cabinetDark, { kind: 'wood', accent: activeTheme.trim });
   kick.position.set(0, 0.08, 0.48);
-  const doorL = box(0.38, 0.48, 0.035, color, { kind: activeTheme.id === 'split' ? 'metal' : 'wood', accent: activeTheme.cabinetDark });
+  const doorL = box(0.38, 0.48, 0.035, color, { kind: cabinetMaterialKind(), accent: activeTheme.cabinetDark });
   doorL.position.set(-0.21, 0.42, 0.49);
   const doorR = doorL.clone(); doorR.position.x = 0.21;
   const knobL = sph(0.025, activeTheme.metal, 6, 4); knobL.position.set(-0.05, 0.43, 0.525);
@@ -488,7 +515,7 @@ function buildStation(st) {
   const style = STATION_STYLE[st.type] || STATION_STYLE.counter;
 
   if (st.type === 'counter') {
-    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: activeTheme.id === 'split' ? 'metal' : 'wood', accent: activeTheme.cabinetDark });
+    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: cabinetMaterialKind(), accent: activeTheme.cabinetDark });
     body.position.y = 0.41;
     const top = box(1.02, 0.09, 1.02, activeTheme.counterTop, { kind: activeTheme.id === 'ring' ? 'tile' : 'noise', accent: activeTheme.grout });
     top.position.y = 0.86;
@@ -563,19 +590,33 @@ function buildStation(st) {
     node.dirtyAnchor = new THREE.Group();
     node.dirtyAnchor.position.set(0.1, 0.92, 0);
     g.add(node.dirtyAnchor);
+    node.dirtyCountAnchor = new THREE.Group();
+    node.dirtyCountAnchor.position.set(0.38, 1.34, 0);
+    g.add(node.dirtyCountAnchor);
     node.bar = makeProgressBar();
     node.bar.position.set(0, 1.45, 0);
     g.add(node.bar);
   } else if (st.type === 'plates') {
-    const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: 'wood', accent: activeTheme.cabinetDark });
+    const body = box(0.96, 0.82, 0.96, 0x5b91b5, { kind: 'wood', accent: 0x315c7b });
     body.position.y = 0.41;
-    const top = box(1.02, 0.08, 1.02, 0xc8b8a8);
+    const top = box(1.04, 0.1, 1.04, 0xf4fbff, { kind: 'tile', accent: 0x75c9ee });
     top.position.y = 0.86;
-    g.add(body, top, makeStationBadge(style.label, style.color));
-    addCabinetDetails(g, activeTheme.cabinet);
+    const sign = box(0.84, 0.38, 0.08, 0x287daf, { kind: 'wood', accent: 0x8ee2ff });
+    sign.position.set(0, 1.55, -0.34);
+    const signBadge = makeStationBadge('净盘', 0xffffff);
+    signBadge.position.set(0, 1.56, -0.39); signBadge.scale.set(0.82, 0.42, 1);
+    for (const x of [-0.29, 0.29]) {
+      const plateMark = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.035, 6, 18), mat(0xffffff, { emissive: 0x77dfff, emissiveIntensity: 0.28 }));
+      plateMark.rotation.x = Math.PI / 2; plateMark.position.set(x, 0.93, 0.32); g.add(plateMark);
+    }
+    g.add(body, top, sign, signBadge);
     node.stackAnchor = new THREE.Group();
     node.stackAnchor.position.y = 0.9;
     g.add(node.stackAnchor);
+    node.glow = new THREE.PointLight(0x78d9ff, 1.15, 3.2);
+    node.glow.position.set(0, 1.25, 0); g.add(node.glow);
+    node.emptyIcon = makeIconSprite('!', '#d73535');
+    node.emptyIcon.position.set(0.38, 1.36, 0); node.emptyIcon.visible = false; g.add(node.emptyIcon);
   } else if (st.type === 'window') {
     const body = box(1.0, 0.82, 0.9, 0xa5694f);
     body.position.y = 0.41;
@@ -657,8 +698,8 @@ function buildMap(layout) {
   const { w, h, cells } = layout;
   const floorGeometry = new THREE.BoxGeometry(0.97, 0.1, 0.97);
   const floorMaterials = [
-    mat(activeTheme.floorA, { kind: activeTheme.id === 'classic' ? 'tile' : 'noise', accent: activeTheme.grout }),
-    mat(activeTheme.floorB, { kind: activeTheme.id === 'classic' ? 'tile' : 'noise', accent: activeTheme.grout }),
+    mat(activeTheme.floorA, { kind: floorMaterialKind(), accent: activeTheme.grout }),
+    mat(activeTheme.floorB, { kind: floorMaterialKind(), accent: activeTheme.grout }),
   ];
   const floorMeshes = floorMaterials.map((material) => new THREE.InstancedMesh(floorGeometry, material, Math.ceil(w * h / 2)));
   const floorCounts = [0, 0];
@@ -666,7 +707,7 @@ function buildMap(layout) {
   let wallCount = 0;
   for (const cell of cells) if (cell === '#') wallCount++;
   const wallGeometry = new THREE.BoxGeometry(1, 1.15, 1);
-  const wallMesh = new THREE.InstancedMesh(wallGeometry, mat(activeTheme.wall, { kind: activeTheme.id === 'split' ? 'metal' : 'noise', accent: activeTheme.wallAlt }), wallCount);
+  const wallMesh = new THREE.InstancedMesh(wallGeometry, mat(activeTheme.wall, { kind: activeTheme.id === 'split' || activeTheme.id === 'space' ? 'metal' : 'noise', accent: activeTheme.wallAlt }), wallCount);
   const trimGeometry = new THREE.BoxGeometry(1.03, 0.1, 1.03);
   const trimMesh = new THREE.InstancedMesh(trimGeometry, mat(activeTheme.trim, { kind: activeTheme.id === 'ring' ? 'metal' : 'wood', accent: activeTheme.wallAlt }), wallCount);
   wallMesh.castShadow = true; wallMesh.receiveShadow = true; trimMesh.castShadow = true;
@@ -687,6 +728,16 @@ function buildMap(layout) {
   floorMeshes.forEach((mesh, i) => { mesh.count = floorCounts[i]; mesh.receiveShadow = true; mapGroup.add(mesh); });
   mapGroup.add(wallMesh, trimMesh);
   environment.buildEnvironment(mapGroup, layout, activeTheme);
+
+  if (layout.mapId === 'awards') {
+    const podiums = [{ x: 7.5, z: 2.4, h: 1.5, label: '1', color: 0xffd23f }, { x: 5.8, z: 2.7, h: 1.05, label: '2', color: 0xcbd3dc }, { x: 9.2, z: 2.8, h: 0.78, label: '3', color: 0xc88755 }];
+    for (const p of podiums) {
+      const block = box(1.45, p.h, 1.35, p.color, { kind: 'noise', accent: 0xffffff });
+      block.position.set(p.x, p.h / 2, p.z); mapGroup.add(block);
+      const badge = makeStationBadge(p.label, p.color); badge.position.set(p.x, p.h + 0.55, p.z); mapGroup.add(badge);
+    }
+    addBuntingToAwards(mapGroup, w);
+  }
 
   // 站台
   for (const key in layout.stationAt) {
@@ -711,20 +762,32 @@ function buildMap(layout) {
   fitCamera();
 }
 
+function addBuntingToAwards(group, w) {
+  for (let i = 0; i < 9; i++) {
+    const flag = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.35, 3), mat([0xff5f57,0xffd23f,0x48c9b0,0x6189ef][i % 4]));
+    flag.rotation.z = Math.PI; flag.position.set(3 + i * (w - 6) / 8, 2.4, 0.8); group.add(flag);
+  }
+}
+
 function fitCamera() {
   if (!builtLayout) {
     camera.position.set(8, 10, 12);
     camera.lookAt(6.5, 0, 4.5);
     return;
   }
-  const { w, h } = builtLayout;
-  const aspect = camera.aspect || 1;
-  // 保证宽度方向完整可见：D 随地图宽与屏幕宽高比放大
-  const fitW = (w / 2 + 2.2) / Math.tan(THREE.MathUtils.degToRad(24)) / Math.max(0.55, aspect);
-  const fitH = (h + 2) * 1.02;
-  const D = Math.max(fitW, fitH, 8.5);
-  camera.position.set(w / 2, D * 0.86, h / 2 + D * 0.6);
-  camera.lookAt(w / 2, 0, h / 2 + 0.2);
+  updateCameraForState(latestState);
+}
+
+function updateCameraForState(state) {
+  if (!builtLayout) return;
+  const poses = cameraPoses(builtLayout, camera.aspect || 1);
+  const isIntro = builtLayout.mapId !== 'awards' && state && state.phase === 'countdown';
+  const elapsedSinceSnapshot = Math.max(0, (performance.now() - introCountdownReceivedAt) / 1000);
+  const predictedCountdown = Math.max(0, introCountdownValue - elapsedSinceSnapshot);
+  const progress = isIntro ? countdownIntroProgress(predictedCountdown, 3) : 1;
+  const position = lerpCameraPose(poses.overview, poses.playing, progress);
+  camera.position.set(position.x, position.y, position.z);
+  camera.lookAt(poses.target.x, poses.target.y, poses.target.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -762,17 +825,19 @@ function applyStations(state) {
       const has = dyn.contents && dyn.contents.length > 0;
       node.contentsMesh.visible = has;
       if (has) {
-        const col = dyn.phase === 'burnt' ? 0x1b1b1b : (ING[dyn.contents[0]] ? ING[dyn.contents[0]].color : 0xaaaaaa);
+        const first = normalizedRequirement(dyn.contents[0]);
+        const col = dyn.phase === 'burnt' ? 0x1b1b1b : (ING[first.ingredient] ? ING[first.ingredient].color : 0xaaaaaa);
         node.contentsMesh.material = mat(col);
         node.contentsMesh.position.y = 1.16 + Math.sin(perfNow * 3 + node.group.position.x) * 0.008;
       }
       // 浮动食材展示
-      const fkey = has ? dyn.contents.join(',') : '';
+      const fkey = has ? recipeKey(dyn.contents) : '';
       if (fkey !== node.floatKey) {
         node.floatKey = fkey;
         while (node.floaters.children.length) node.floaters.remove(node.floaters.children[0]);
-        (dyn.contents || []).forEach((g, i) => {
-          const im = makeIngredientMesh(g, false);
+        (dyn.contents || []).forEach((item, i) => {
+          const requirement = normalizedRequirement(item);
+          const im = makeIngredientMesh(requirement.ingredient, requirement.prep === 'chopped');
           im.scale.setScalar(0.72);
           im.position.set((i - (dyn.contents.length - 1) / 2) * 0.34, 0, 0);
           node.floaters.add(im);
@@ -814,6 +879,7 @@ function applyStations(state) {
     if (node.type === 'sink') {
       const dirty = state.plates ? state.plates.dirty : 0;
       if (dirty !== node.dirtyCount) {
+        const previousDirty = node.dirtyCount || 0;
         node.dirtyCount = dirty;
         while (node.dirtyAnchor.children.length) node.dirtyAnchor.remove(node.dirtyAnchor.children[0]);
         for (let i = 0; i < Math.min(dirty, 6); i++) {
@@ -821,7 +887,21 @@ function applyStations(state) {
           p.position.y = i * 0.045;
           node.dirtyAnchor.add(p);
         }
+        while (node.dirtyCountAnchor.children.length) {
+          const old = node.dirtyCountAnchor.children[0];
+          node.dirtyCountAnchor.remove(old);
+          if (old.material?.map) old.material.map.dispose();
+          if (old.material) old.material.dispose();
+        }
+        if (dirty > 0) node.dirtyCountAnchor.add(makeStationBadge(`×${dirty}`, 0x35a9d6));
+        if (dirty > previousDirty) {
+          node.dirtyPulseUntil = perfNow + 0.7;
+          const pos = new THREE.Vector3(); node.group.getWorldPosition(pos); pos.y = 1.05;
+          effects.emit('bubble', pos, { count: 5, spread: 0.55, rise: 0.65, life: 0.9, size: 0.8 });
+        }
       }
+      const pulse = node.dirtyPulseUntil > perfNow ? 1 + Math.sin((node.dirtyPulseUntil - perfNow) * 18) * 0.12 : 1;
+      node.dirtyAnchor.scale.setScalar(pulse);
       if (state.plates && state.plates.washT > 0 && dirty > 0) {
         setBar(node.bar, state.plates.washT / 4, 0x4fc3f7);
         if (perfNow >= node.nextFx) {
@@ -846,6 +926,10 @@ function applyStations(state) {
           node.stackAnchor.add(p);
         }
       }
+      const plateState = plateStationState(clean, perfNow);
+      node.glow.color.setHex(plateState.color);
+      node.glow.intensity = plateState.intensity;
+      node.emptyIcon.visible = plateState.empty;
     }
 
     // 出菜口：有订单时亮灯
@@ -931,8 +1015,9 @@ function applyPlayers(state, dt) {
   }
 }
 
+function canMoveNow() { return latestState && (latestState.phase === 'playing' || latestState.phase === 'awards'); }
 function stepPrediction(dt) {
-  if (!selfPos || !builtLayout || !latestState || latestState.phase !== 'playing') return;
+  if (!selfPos || !builtLayout || !canMoveNow()) return;
   const ix = selfInput.dx;
   const iz = selfInput.dz;
   if (ix || iz) {
@@ -964,7 +1049,7 @@ function interpolatePlayers(dt) {
   for (const [id, node] of playerNodes) {
     const beforeX = node.render.x;
     const beforeZ = node.render.z;
-    if (id === myId && selfPos && latestState && latestState.phase === 'playing') {
+    if (id === myId && selfPos && canMoveNow()) {
       node.render.x = selfPos.x;
       node.render.z = selfPos.z;
     } else {
@@ -991,7 +1076,7 @@ function interpolatePlayers(dt) {
     if (node.state && latestState) {
       const target = facingTarget(latestState, node.state);
       stationType = target && target.st.type;
-      if (node.state.working && stationType === 'board' && perfNow >= (node.nextWorkFx || 0)) {
+      if (node.state.working && stationType === 'board' && target.dyn?.item?.k === 'raw' && ING[target.dyn.item.g]?.choppable && perfNow >= (node.nextWorkFx || 0)) {
         const pos = new THREE.Vector3(node.render.x, 0.95, node.render.z);
         effects.emit('crumb', pos, { count: 2, spread: 0.22, rise: 0.35, outward: 0.65, life: 0.48, size: 0.65 });
         node.nextWorkFx = perfNow + (qualityTier === 'low' ? 0.28 : 0.16);
@@ -1020,7 +1105,7 @@ function itemLabel(item) {
   if (item.k === 'raw') return ING[item.g].name + '（未切）';
   if (item.k === 'chopped') return ING[item.g].name + '（已切）';
   if (item.k === 'plate') return '空盘子';
-  if (item.k === 'dish') return item.items.map((g) => ING[g].name).join('+');
+  if (item.k === 'dish') return item.items.map((entry) => { const r = normalizedRequirement(entry); return `${ING[r.ingredient].name}${r.prep === 'chopped' ? '（切）' : '（整）'}`; }).join('+');
   return '';
 }
 
@@ -1034,16 +1119,17 @@ function stationHint(st, dyn, me, state) {
     const item = dyn && dyn.item;
     if (!c && item) {
       const h = { e: '拿起' + itemLabel(item) };
-      if (st.type === 'board' && item.k === 'raw') h.q = '切菜（按住）';
+      if (st.type === 'board' && item.k === 'raw' && ING[item.g]?.choppable) h.q = '切菜（按住）';
       return h;
     }
     if (c && !item) {
       if (st.type === 'board' && !(c.k === 'raw' || c.k === 'chopped')) return { info: '砧板只能放食材' };
+      if (st.type === 'board' && c.k === 'raw' && !ING[c.g]?.choppable) return { info: `${ING[c.g].name}不可切，按订单“整”直接使用`, warn: true };
       return { e: '放下' + itemLabel(c) };
     }
     if (c && item) {
-      if (c.k === 'chopped' && (item.k === 'plate' || item.k === 'dish') && item.items.length < 3) {
-        return { e: '把' + ING[c.g].name + '放上盘子' };
+      if ((c.k === 'raw' || c.k === 'chopped') && (item.k === 'plate' || item.k === 'dish') && item.items.length < 3) {
+        return { e: `把${c.k === 'chopped' ? '切碎' : '完整'}${ING[c.g].name}放上盘子` };
       }
       return { info: '被占用了' };
     }
@@ -1052,7 +1138,7 @@ function stationHint(st, dyn, me, state) {
   if (st.type === 'stove') {
     const pot = dyn;
     if (!pot) return null;
-    const names = pot.contents.map((g) => ING[g].name);
+    const names = pot.contents.map((item) => { const r = normalizedRequirement(item); return `${ING[r.ingredient].name}${r.prep === 'chopped' ? '（切）' : '（整）'}`; });
     if (pot.phase === 'cooking') {
       return { info: `🔥 炖煮中 ${Math.round((pot.t / 12) * 100)}%｜${names.join('+')}` };
     }
@@ -1064,37 +1150,36 @@ function stationHint(st, dyn, me, state) {
       return c ? { info: '锅烧糊了，空手来清理', warn: true } : { e: '倒掉糊锅', warn: true };
     }
     // idle
-    if (c && c.k === 'chopped') {
+    if (c && (c.k === 'raw' || c.k === 'chopped')) {
       if (!COOKABLE.has(c.g)) return { info: `${ING[c.g].name}不能下锅，只能做沙拉` };
       if (pot.contents.length >= 3) return { info: '锅满了' };
-      const after = pot.contents.concat([c.g]);
+      const after = pot.contents.concat([normalizedRequirement(c)]);
       const exact = RECIPES.find((r) => r.cook && recipeKey(r.items) === recipeKey(after));
       if (exact) return { e: `下锅（即可开煮${exact.name}）` };
       const cand = RECIPES.find((r) => r.cook && isSubset(after, r.items));
       if (cand) {
         const need = missingItems(after, cand.items);
-        return { e: `下锅｜还需${need.map((g) => ING[g].name).join('+')}开煮`, info: pot.contents.length ? `锅里：${names.join('+')}` : null };
+        return { e: `下锅｜还需${need.map((r) => `${r.prep === 'chopped' ? '切碎' : '完整'}${ING[r.ingredient].name}`).join('+')}开煮`, info: pot.contents.length ? `锅里：${names.join('+')}` : null };
       }
       return { e: '下锅', info: '⚠️ 这个组合会煮糊！', warn: true };
     }
-    if (c && c.k === 'raw') return { info: '生的不能下锅，先去砧板切碎' };
     if (c && c.k === 'plate') {
-      return { info: pot.contents.length ? `还没煮好｜锅里：${names.join('+')}` : '锅是空的，先放切碎的食材' };
+      return { info: pot.contents.length ? `还没煮好｜锅里：${names.join('+')}` : '锅是空的，按订单准备食材' };
     }
     if (c && c.k === 'dish') return { info: '这道菜已经装好了，端去出菜口' };
     if (!c && pot.contents.length) {
       const cand = RECIPES.find((r) => r.cook && isSubset(pot.contents, r.items));
       if (cand) {
         const need = missingItems(pot.contents, cand.items);
-        return { info: `锅里：${names.join('+')}｜还需${need.map((g) => ING[g].name).join('+')}开煮` };
+        return { info: `锅里：${names.join('+')}｜还需${need.map((r) => `${r.prep === 'chopped' ? '切碎' : '完整'}${ING[r.ingredient].name}`).join('+')}开煮` };
       }
       return { e: '倒掉', info: '组合不对，已无法成汤', warn: true };
     }
-    return { info: '把切碎的食材放进来煮' };
+    return { info: '按订单角标放入完整或切碎食材' };
   }
   if (st.type === 'plates') {
     if (c) return { info: '先放下手上的东西' };
-    return state.plates.clean > 0 ? { e: `拿盘子（剩${state.plates.clean}）` } : { info: '盘子用完了，去水槽洗', warn: true };
+    return state.plates.clean > 0 ? { e: `拿盘子｜净盘 ×${state.plates.clean}` } : { info: '净盘 ×0｜去洗碗池洗盘子', warn: true };
   }
   if (st.type === 'window') {
     if (c && c.k === 'dish') {
@@ -1109,9 +1194,9 @@ function stationHint(st, dyn, me, state) {
     return c ? { e: '扔掉' + itemLabel(c) } : { info: '垃圾桶：扔手上的东西' };
   }
   if (st.type === 'sink') {
-    if (state.plates.dirty > 0 && !c) return { q: '洗碗（按住）', info: `脏盘子 ×${state.plates.dirty}` };
+    if (state.plates.dirty > 0 && !c) return { q: '洗碗（按住）', info: `洗碗池｜脏盘 ×${state.plates.dirty}` };
     if (state.plates.dirty > 0) return { info: '洗碗需要空手' };
-    return { info: '水槽很干净' };
+    return { info: '洗碗池：上菜后的脏盘会回到这里' };
   }
   return null;
 }
@@ -1189,10 +1274,21 @@ function fmtTime(sec) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
-function ingDotsHtml(key) {
-  return key.split('+').map((g) => {
-    const c = ING[g] ? '#' + ING[g].color.toString(16).padStart(6, '0') : '#999';
-    return `<i style="background:${c}"></i>`;
+function orderRequirements(order, recipe) {
+  if (order.items && order.items.length) return order.items.map(normalizedRequirement);
+  if (recipe) return recipe.items;
+  return (order.key || '').split('+').filter(Boolean).map((token) => {
+    const [ingredient, prep = 'chopped'] = token.split(':');
+    return { ingredient, prep };
+  });
+}
+
+function ingDotsHtml(items) {
+  return items.map((item) => {
+    const requirement = normalizedRequirement(item);
+    const badge = ingredientBadge(ING, requirement.ingredient, requirement.prep);
+    const prepName = requirement.prep === 'chopped' ? '切碎' : '完整';
+    return `<i style="background:${badge.color}" aria-label="${prepName}${badge.name}">${badge.label}<b>${badge.prepLabel}</b></i>`;
   }).join('');
 }
 
@@ -1204,9 +1300,10 @@ function applyOrders(state) {
     if (!card) {
       const d = document.createElement('div');
       d.className = 'order-card';
-      const recipe = RECIPES.find((r) => recipeKey(r.items) === o.key);
+      const recipe = RECIPES.find((r) => r.id === o.recipeId) || RECIPES.find((r) => recipeKey(r.items) === o.key);
+      const requirements = orderRequirements(o, recipe);
       d.innerHTML = `<div class="o-head"><span class="o-type">${recipe && recipe.cook ? '🍲' : '🥗'}</span><div class="o-name">${o.name}<small>${o.points}分</small></div></div>
-        <div class="o-dots">${ingDotsHtml(o.key)}</div>
+        <div class="o-dots">${ingDotsHtml(requirements)}</div>
         <div class="o-bar"><i></i></div>`;
       el.orders.appendChild(d);
       card = { el: d, fill: d.querySelector('.o-bar i') };
@@ -1228,6 +1325,9 @@ function applyHud(state) {
   el.timeVal.textContent = fmtTime(state.timeLeft || 0);
   el.timeChip.classList.toggle('low', (state.timeLeft || 0) < 30);
   el.scoreVal.textContent = String(state.score || 0);
+  el.roundVal.textContent = state.mode === 'party' ? `${state.roundIndex || 1}/3 · 难度${state.difficultyLevel || 1}` : `第${state.roundIndex || 1}局 · 难度${state.difficultyLevel || 1}`;
+  el.rageChip.classList.toggle('hidden', state.mode !== 'endless');
+  el.rageVal.textContent = `${state.rage || 0}/${state.rageMax || 100}`;
   el.servedVal.textContent = String(state.served || 0);
   el.expiredVal.textContent = String(state.expired || 0);
   applyOrders(state);
@@ -1240,7 +1340,7 @@ function applyHud(state) {
     if (c.k === 'raw') text = `手上：${ING[c.g].name}（未切）`;
     else if (c.k === 'chopped') text = `手上：${ING[c.g].name}（已切）`;
     else if (c.k === 'plate') text = '手上：空盘子';
-    else if (c.k === 'dish') text = `手上：${c.items.map((g) => ING[g].name).join('+')}`;
+    else if (c.k === 'dish') text = `手上：${c.items.map((item) => { const r = normalizedRequirement(item); return `${ING[r.ingredient].name}${r.prep === 'chopped' ? '（切）' : '（整）'}`; }).join('+')}`;
     el.carryChip.textContent = text;
     el.carryChip.classList.remove('hidden');
   } else {
@@ -1249,20 +1349,24 @@ function applyHud(state) {
 }
 
 // ---- 大厅 ----
-const mapCardEls = new Map();
+const modeCardEls = new Map();
 function buildLobbyOnce() {
-  for (const m of MAP_META) {
-    const theme = themeFor(m.id);
+  for (const m of [
+    { id: 'party', name: '派对模式', ico: '🎉', desc: '3 局连战 · 逐局升级 · 随机地图' },
+    { id: 'endless', name: '无尽模式', ico: '🔥', desc: '无限换图 · 怒气达到 100 结束' },
+  ]) {
     const btn = document.createElement('button');
-    btn.className = `map-card theme-${m.id}`;
-    btn.innerHTML = `<div class="m-preview"><i></i><i></i><i></i><span>${theme.icon}</span></div><div class="m-name">${m.name}</div><div class="m-theme">${theme.label}</div><div class="m-desc">${m.desc}</div>`;
-    btn.onclick = () => { audio.playSfx('ui'); parti.action('selectMap', { mapId: m.id }); };
-    el.mapCards.appendChild(btn);
-    mapCardEls.set(m.id, btn);
+    btn.className = 'map-card';
+    btn.innerHTML = `<div class="m-preview"><i></i><i></i><i></i><span>${m.ico}</span></div><div class="m-name">${m.name}</div><div class="m-desc">${m.desc}</div>`;
+    btn.onclick = () => { audio.playSfx('ui'); parti.action('selectMode', { mode: m.id }); };
+    el.modeCards.appendChild(btn);
+    modeCardEls.set(m.id, btn);
   }
   el.startBtn.onclick = () => { audio.playSfx('ui'); parti.action('start'); };
   el.rematchBtn.onclick = () => { audio.playSfx('ui'); parti.action('rematch'); };
   el.tolobbyBtn.onclick = () => { audio.playSfx('ui'); parti.action('toLobby'); };
+  el.awardRematchBtn.onclick = () => { audio.playSfx('ui'); parti.action('rematch'); };
+  el.awardLobbyBtn.onclick = () => { audio.playSfx('ui'); parti.action('toLobby'); };
 }
 buildLobbyOnce();
 
@@ -1271,9 +1375,9 @@ function applyLobby(state) {
   const isHost = parti.playerId && state.hostId === parti.playerId;
   const count = Object.keys(state.players || {}).length;
 
-  for (const m of MAP_META) {
-    const card = mapCardEls.get(m.id);
-    card.classList.toggle('sel', state.mapId === m.id);
+  for (const mode of ['party', 'endless']) {
+    const card = modeCardEls.get(mode);
+    card.classList.toggle('sel', state.mode === mode);
     card.classList.toggle('locked', !isHost);
   }
 
@@ -1300,8 +1404,8 @@ function applyLobby(state) {
   el.startBtn.classList.toggle('hidden', !isHost);
   el.startBtn.disabled = count < 2;
   el.lobbyNote.textContent = isHost
-    ? (count < 2 ? '至少需要 2 名玩家才能开火（分享邀请链接给朋友吧）' : `${count} 名厨师就位，选择地图后开火！`)
-    : '等待房主选择地图并开始…（2-4 人）';
+    ? (count < 2 ? '至少需要 2 名玩家才能开火（分享邀请链接给朋友吧）' : `${count} 名厨师就位，选择模式后开火！`)
+    : '等待房主选择模式并开始…（2-4 人）';
 }
 
 // ---- 结算 ----
@@ -1325,21 +1429,61 @@ function applyEnded(state) {
   el.endNote.textContent = isHost ? '' : '等待房主选择…';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[ch]);
+}
+
+function renderComment(node, comment) {
+  node.classList.toggle('hidden', !comment);
+  node.classList.toggle('rare', !!comment?.rare);
+  node.innerHTML = comment ? `<strong>${escapeHtml(comment.title)}</strong><span>${escapeHtml(comment.subtitle || '')}</span>` : '';
+}
+
+function rankingRows(entries, round = false, titles = {}) {
+  return entries.map((p, i) => {
+    const award = titles[p.id];
+    const detail = award ? `<small class="rank-title${award.rare ? ' rare' : ''}">${escapeHtml(award.icon)} ${escapeHtml(award.title)} · ${escapeHtml(award.reason)}</small>` : '';
+    return `<div class="rank-row"><b>${p.rank || i + 1}</b><span class="rank-player"><span class="rank-name"><i style="background:${escapeHtml(p.color)}"></i>${escapeHtml(p.name)}</span>${detail}</span><strong>${round ? (p.roundContributionScore || 0) : (p.contributionScore || 0)} 分</strong></div>`;
+  }).join('');
+}
+
+function applyRoundResult(state) {
+  const players = Object.entries(state.players || {}).map(([id, p]) => ({ id, ...p })).sort((a, b) => (b.roundContributionScore || 0) - (a.roundContributionScore || 0) || (a.joinOrder || 0) - (b.joinOrder || 0));
+  el.roundTitle.textContent = `🍽️ 第 ${state.roundIndex} 局结束 · ${state.roundScore || 0} 分`;
+  renderComment(el.roundComment, state.roundComment);
+  el.roundBoard.innerHTML = rankingRows(players, true, state.roundTitles || {});
+  const next = MAP_META.find((m) => m.id === state.nextMapId);
+  el.roundNext.textContent = `${Math.max(0, Math.ceil(state.roundResultTime || 0))} 秒后前往 ${next ? next.name : '下一张地图'} · 难度 ${state.difficultyLevel + 1}`;
+}
+
+function applyAwards(state) {
+  const isHost = parti.playerId && state.hostId === parti.playerId;
+  el.awardTotal.textContent = `团队 ${state.sessionScore || 0} 分 · ${state.roundIndex} 局 · 上菜 ${state.served || 0}`;
+  renderComment(el.finalComment, state.finalComment);
+  el.awardBoard.innerHTML = rankingRows(state.standings || [], false, state.finalTitles || {});
+  el.awardsActions.classList.toggle('hidden', !isHost);
+}
+
 function setPhase(phase, state) {
   if (phase === currentPhase) return;
   currentPhase = phase;
-  el.app.classList.toggle('gesture-locked', phase === 'playing' || phase === 'countdown');
+  el.app.classList.toggle('gesture-locked', phase === 'playing' || phase === 'countdown' || phase === 'awards');
   el.lobby.classList.toggle('hidden', phase !== 'lobby');
   el.ended.classList.toggle('hidden', phase !== 'ended');
+  el.roundResult.classList.toggle('hidden', phase !== 'roundResult');
+  el.awardsHud.classList.toggle('hidden', phase !== 'awards');
+  if (phase !== 'awards') el.awardsActions.classList.add('hidden');
   el.hud.classList.toggle('hidden', !(phase === 'playing' || phase === 'countdown'));
   el.countdown.classList.toggle('hidden', phase !== 'countdown');
-  el.touchUi.classList.toggle('hidden', !(IS_TOUCH && phase === 'playing'));
+  el.touchUi.classList.toggle('hidden', !(IS_TOUCH && (phase === 'playing' || phase === 'awards')));
   if (phase === 'ended') applyEnded(state);
   if (phase === 'lobby') {
     // 离开对局时清掉 3D 场景以外的杂项
     orderCards.forEach((c) => c.el.remove());
     orderCards.clear();
   }
+  if (phase === 'roundResult') applyRoundResult(state);
+  if (phase === 'awards') applyAwards(state);
 }
 
 // iOS Safari 等浏览器有时不会只凭 touch-action/overflow 禁止长按菜单和
@@ -1415,6 +1559,10 @@ function applyAudioState(previous, state) {
 parti.onState((state) => {
   const previousState = latestState;
   latestState = state;
+  if (state.phase === 'countdown') {
+    introCountdownValue = state.countdown || 0;
+    introCountdownReceivedAt = performance.now();
+  }
   applyAudioState(previousState, state);
   if (state.layout && state.gameSeq !== builtGameSeq) {
     builtGameSeq = state.gameSeq;
@@ -1437,6 +1585,8 @@ parti.onState((state) => {
     applyPlayers(state);
     applyStations(state);
   }
+  if (state.phase === 'roundResult') applyRoundResult(state);
+  if (state.phase === 'awards') { applyAwards(state); applyPlayers(state); }
 });
 
 parti.onEvent('game:countdown', (p) => { toast(`地图：${p.mapName || ''}，各就各位！`); audio.playSfx('join'); });
@@ -1607,7 +1757,7 @@ function updateWorkSound(ts) {
   if (!me || !me.working || ts < nextWorkSoundAt) return;
   const target = facingTarget(latestState, me);
   if (!target) return;
-  if (target.st.type === 'board' && target.dyn && target.dyn.item && target.dyn.item.k === 'raw') {
+  if (target.st.type === 'board' && target.dyn && target.dyn.item && target.dyn.item.k === 'raw' && ING[target.dyn.item.g]?.choppable) {
     audio.playSfx('chop');
     nextWorkSoundAt = ts + 190;
   } else if (target.st.type === 'sink' && !me.carrying && latestState.plates && latestState.plates.dirty > 0) {
@@ -1656,7 +1806,7 @@ function frame(ts) {
   const kb = keyboardVector();
   const v = (kb.dx || kb.dz) ? kb : joyVec;
   selfInput = v;
-  if (latestState && latestState.phase === 'playing') {
+  if (canMoveNow()) {
     sendMove(v);
   }
 
@@ -1668,7 +1818,7 @@ function frame(ts) {
   effects.update(dt);
   let targetEnvironmentProgress = 0;
   if (latestState && latestState.phase === 'playing') targetEnvironmentProgress = THREE.MathUtils.clamp((GAME_DURATION - (latestState.timeLeft || 0)) / GAME_DURATION, 0, 1);
-  else if (latestState && latestState.phase === 'ended') targetEnvironmentProgress = 1;
+  else if (latestState && (latestState.phase === 'awards' || latestState.phase === 'roundResult')) targetEnvironmentProgress = 1;
   environmentProgress += (targetEnvironmentProgress - environmentProgress) * (1 - Math.exp(-dt * 2.4));
   environment.updateEnvironment(environmentProgress, perfNow);
   if (targetRing.visible) {
@@ -1681,6 +1831,8 @@ function frame(ts) {
   if (latestState && (latestState.phase === 'playing' || latestState.phase === 'countdown') && stationNodes.size) {
     applyStations(latestState);
   }
+
+  updateCameraForState(latestState);
 
   renderer.render(scene, camera);
 }

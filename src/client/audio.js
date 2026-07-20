@@ -5,6 +5,7 @@ const MODE = {
   countdown: { bpm: 112, length: 16 },
   playing: { bpm: 124, length: 64 },
   urgent: { bpm: 140, length: 64 },
+  awards: { bpm: 108, length: 64 },
 };
 
 const MIDI = (note) => 440 * 2 ** ((note - 69) / 12);
@@ -13,6 +14,8 @@ export function musicModeFor(phase, timeLeft = 0) {
   if (phase === 'lobby') return 'lobby';
   if (phase === 'countdown') return 'countdown';
   if (phase === 'playing') return timeLeft > 0 && timeLeft <= 30 ? 'urgent' : 'playing';
+  if (phase === 'roundResult') return 'lobby';
+  if (phase === 'awards') return 'awards';
   return null;
 }
 

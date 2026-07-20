@@ -200,6 +200,77 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
     addBunting(parent, w, -0.66);
   }
 
+  function addSnowPine(parent, x, z, scale = 1) {
+    const trunk = cyl(0.07, 0.11, 0.65 * scale, 0x6d4b38, 7); trunk.position.set(x, 0.25 * scale, z); parent.add(trunk);
+    for (let i = 0; i < 3; i++) {
+      const crown = new THREE.Mesh(new THREE.ConeGeometry((0.48 - i * 0.08) * scale, 0.72 * scale, 8), mat(i % 2 ? 0x397b68 : 0x2f6b5d, { kind: 'noise', accent: 0xdff5ff }));
+      crown.position.set(x, (0.65 + i * 0.34) * scale, z); crown.castShadow = true; parent.add(crown);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry((0.38 - i * 0.065) * scale, 0.18 * scale, 8), mat(0xf4fbff));
+      cap.position.set(x, (0.94 + i * 0.34) * scale, z); parent.add(cap);
+    }
+  }
+
+  function buildSnow(parent, layout) {
+    parent.userData.landmarks = ['mountains', 'food-truck', 'snow-pines', 'snowfall'];
+    const { w, h } = layout;
+    const snow = box(w + 5, 0.2, h + 4.8, 0xeaf7ff, { kind: 'noise', accent: 0xc6e5f4 }); snow.position.set(w / 2, -0.22, h / 2); snow.receiveShadow = true; parent.add(snow);
+    for (let i = 0; i < 5; i++) {
+      const mountain = new THREE.Mesh(new THREE.ConeGeometry(2.2 + i * 0.24, 4.2 + i * 0.3, 5), mat(i % 2 ? 0x91b4c7 : 0x789eb3, { kind: 'noise', accent: 0xeaf8ff }));
+      mountain.position.set(-5 + i * 6.2, 1.45, -5.8 - (i % 2) * 1.4); parent.add(mountain);
+      const peak = new THREE.Mesh(new THREE.ConeGeometry(0.75 + i * 0.05, 1.15, 5), mat(0xf8fdff)); peak.position.set(mountain.position.x, 3.2 + i * 0.14, mountain.position.z); parent.add(peak);
+    }
+    const truck = new THREE.Group(); truck.position.set(w / 2, 0, h + 1.15);
+    const body = box(7.4, 1.35, 1.2, 0x4f8fc9, { kind: 'metal', accent: 0x89c7ed }); body.position.y = 0.62; truck.add(body);
+    const awning = box(5.2, 0.12, 0.85, 0xffa43d); awning.position.set(0, 1.42, -0.45); awning.rotation.x = -0.18; truck.add(awning);
+    for (const x of [-2.55, 2.55]) { const wheel = cyl(0.36, 0.36, 0.22, 0x263238, 12); wheel.rotation.z = Math.PI / 2; wheel.position.set(x, 0.12, 0); truck.add(wheel); }
+    const chimney = cyl(0.11, 0.16, 1.05, 0x566b75, 8, { kind: 'metal' }); chimney.position.set(2.7, 1.55, 0); truck.add(chimney);
+    parent.add(truck);
+    for (const [x, z, s] of [[-1.2,1,1.1],[w+1.2,1.6,.9],[-1.3,h-1,.85],[w+1.3,h-1.3,1.15]]) addSnowPine(parent, x, z, s);
+    const sign = box(1.5, 0.72, 0.12, 0x8a5b3d, { kind: 'wood', accent: 0xd9a56d }); sign.position.set(-1.05, 0.65, h / 2); parent.add(sign);
+    const flakes = qualityTier === 'low' ? 10 : 28;
+    for (let i = 0; i < flakes; i++) { const flake = sph(0.035 + (i % 3) * 0.012, 0xffffff, 5, 4); flake.position.set((i * 3.17) % (w + 4) - 2, 0.8 + (i * 1.73) % 4.5, (i * 2.21) % (h + 3) - 1.5); parent.add(flake); movers.push({ kind: 'snow', object: flake, startY: flake.position.y, phase: i * 0.61, span: 4.5 }); }
+    addBunting(parent, w, -0.68);
+  }
+
+  function buildSpace(parent, layout) {
+    parent.userData.landmarks = ['starfield', 'ringed-planet', 'station-hull', 'isolation-chamber'];
+    const { w, h } = layout;
+    const hull = box(w + 3.8, 0.2, h + 3.5, 0x6878a7, { kind: 'metal', accent: 0x91a8ce }); hull.position.set(w / 2, -0.22, h / 2); hull.receiveShadow = true; parent.add(hull);
+    const horizon = new THREE.Mesh(new THREE.TorusGeometry(Math.max(w, h) * 0.72, 0.1, 8, 48), mat(0x55e6ef, { emissive: 0x55e6ef, emissiveIntensity: 0.8 })); horizon.rotation.x = Math.PI / 2; horizon.position.set(w / 2, -0.05, h / 2); parent.add(horizon);
+    const planet = sph(2.25, 0x7359b8, 18, 12); planet.material = mat(0x7359b8, { emissive: 0x2d235f, emissiveIntensity: 0.4 }); planet.position.set(w + 7, 4.8, -9); parent.add(planet);
+    const planetRing = new THREE.Mesh(new THREE.TorusGeometry(3.05, 0.16, 8, 36), mat(0xd78cff, { emissive: 0x7d43b1, emissiveIntensity: 0.4 })); planetRing.position.copy(planet.position); planetRing.rotation.set(1.1, 0.2, 0.35); parent.add(planetRing); rotors.push({ object: planetRing, speed: 0.035 });
+    const stars = qualityTier === 'low' ? 20 : 52;
+    for (let i = 0; i < stars; i++) { const star = sph(0.025 + (i % 4) * 0.012, i % 5 ? 0xd9eeff : 0xffb8f1, 5, 4); star.material = mat(star.material.color.getHex(), { emissive: star.material.color.getHex(), emissiveIntensity: 0.8 }); star.position.set((i * 7.13) % (w + 22) - 11, 2.5 + (i * 2.37) % 7, -7 - (i % 5) * 2.2); parent.add(star); partyLights.push(star); }
+    for (const side of [-1, 1]) {
+      const x = side < 0 ? -1.1 : w + 1.1;
+      const dock = cyl(0.7, 0.7, 1.6, 0x667aa8, 10, { kind: 'metal', accent: 0x62edf2 }); dock.rotation.z = Math.PI / 2; dock.position.set(x, 0.75, h / 2); parent.add(dock);
+      const antenna = cyl(0.035, 0.05, 1.4, 0x9fb6c5, 7); antenna.position.set(x, 1.8, h / 2); parent.add(antenna);
+    }
+    for (const x of [-2.7, w + 2.7]) { const panel = box(2.5, 0.08, 1.15, 0x4678bd, { kind: 'metal', accent: 0x78c8ef }); panel.position.set(x, 0.45, h / 2); panel.rotation.z = 0.12; parent.add(panel); }
+    for (let x = 6; x <= 10; x++) { const rail = box(0.78, 0.045, 0.08, x % 2 ? 0xffc53d : 0x292929); rail.position.set(x + 0.5, 1.25, 3.53); parent.add(rail); }
+    const chamber = new THREE.PointLight(0xb9fbff, 1.85, 7); chamber.position.set(8.5, 2.3, 4.8); parent.add(chamber);
+  }
+
+  function addCastleTower(parent, x, z, scale = 1) {
+    const tower = cyl(0.72 * scale, 0.82 * scale, 2.5 * scale, 0x847568, 10, { kind: 'noise', accent: 0xb09c82 }); tower.position.set(x, 1.05 * scale, z); parent.add(tower);
+    for (let i = 0; i < 8; i++) { const merlon = box(0.22 * scale, 0.35 * scale, 0.22 * scale, 0xb09c82); const a = i * Math.PI / 4; merlon.position.set(x + Math.cos(a) * 0.65 * scale, 2.43 * scale, z + Math.sin(a) * 0.65 * scale); parent.add(merlon); }
+  }
+
+  function buildCastle(parent, layout) {
+    parent.userData.landmarks = ['towers', 'battlements', 'royal-banners', 'torches'];
+    const { w, h } = layout;
+    const yard = box(w + 4.2, 0.2, h + 4, 0x75815f, { kind: 'noise', accent: 0x9aa079 }); yard.position.set(w / 2, -0.22, h / 2); yard.receiveShadow = true; parent.add(yard);
+    const stone = box(w + 2.4, 0.12, h + 2.2, 0xa9977c, { kind: 'tile', accent: 0x6f6254 }); stone.position.set(w / 2, -0.1, h / 2); parent.add(stone);
+    addCastleTower(parent, -1, 0); addCastleTower(parent, w + 1, 0); addCastleTower(parent, -1, h); addCastleTower(parent, w + 1, h);
+    const backWall = box(w + 2, 1.65, 0.42, 0x847568, { kind: 'noise', accent: 0xb09c82 }); backWall.position.set(w / 2, 0.65, h + 1.05); parent.add(backWall);
+    for (let x = 0; x <= w; x += 1.2) { const merlon = box(0.55, 0.48, 0.5, 0xb09c82); merlon.position.set(x, 1.62, h + 1.05); parent.add(merlon); }
+    const bannerColors = [0x702f3b, 0xd7a83f];
+    for (let i = 0; i < 5; i++) { const banner = box(0.48, 0.82, 0.045, bannerColors[i % 2]); banner.position.set(2 + i * (w - 4) / 4, 1.15, h + 0.8); parent.add(banner); movers.push({ kind: 'banner', object: banner, phase: i * 0.8 }); }
+    for (const x of [2.1, w - 2.1]) { const table = box(2.1, 0.12, 0.72, 0x68422f, { kind: 'wood', accent: 0x39251f }); table.position.set(x, 0.52, -1); parent.add(table); for (const sx of [-0.78, 0.78]) { const leg = box(0.12, 0.5, 0.12, 0x39251f); leg.position.set(x + sx, 0.24, -1); parent.add(leg); } }
+    for (const [x, z] of [[-0.65,2],[w+0.65,2],[-0.65,h-2],[w+0.65,h-2]]) { const sconce = cyl(0.06, 0.08, 0.62, 0x6a4934, 7); sconce.position.set(x, 0.75, z); parent.add(sconce); const flame = sph(0.13, 0xff9d35, 7, 5); flame.material = mat(0xff9d35, { emissive: 0xff5b20, emissiveIntensity: 1 }); flame.position.set(x, 1.13, z); parent.add(flame); partyLights.push(flame); movers.push({ kind: 'torch', object: flame, phase: x + z }); }
+    addBunting(parent, w, -0.66);
+  }
+
   function buildEnvironment(parent, layout, nextTheme) {
     dispose();
     theme = nextTheme; bounds = { w: layout.w, h: layout.h };
@@ -209,11 +280,15 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
     sky = new THREE.Mesh(new THREE.SphereGeometry(65, 20, 12), skyMaterial); sky.position.set(layout.w / 2, 0, layout.h / 2); sky.renderOrder = -100; group.add(sky);
     sunDisk = sph(1.15, initial.sun, 12, 8); sunDisk.material = mat(initial.sun, { emissive: initial.sun, emissiveIntensity: 0.75 }); sunDisk.castShadow = false; group.add(sunDisk);
     const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, fog: false });
-    const cloudCount = qualityTier === 'low' ? 3 : 6;
+    const cloudCount = theme.decor === 'space' ? 0 : (qualityTier === 'low' ? 3 : 6);
+    group.userData.cloudCount = cloudCount;
     for (let i = 0; i < cloudCount; i++) clouds.push(addCloud(group, -7 + i * 5.6, 3.35 + (i % 2) * 0.75, -4.2 - (i % 3) * 1.25, 0.82 + (i % 3) * 0.18, cloudMaterial));
     if (theme.decor === 'garden') buildGarden(group, layout.w, layout.h);
     else if (theme.decor === 'factory') buildFactory(group, layout);
-    else buildIsland(group, layout.w, layout.h);
+    else if (theme.decor === 'island') buildIsland(group, layout.w, layout.h);
+    else if (theme.decor === 'snow') buildSnow(group, layout);
+    else if (theme.decor === 'space') { sunDisk.visible = false; buildSpace(group, layout); }
+    else if (theme.decor === 'castle') buildCastle(group, layout);
     updateEnvironment(0, 0);
     return group;
   }
@@ -243,7 +318,12 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
       else if (mover.kind === 'boat') {
         mover.object.position.x = mover.startX + Math.sin(elapsed * 0.2 * pace + mover.phase) * 1.2;
         mover.object.position.y = 0.05 + Math.sin(elapsed * 1.1 + mover.phase) * 0.045;
-      }
+      } else if (mover.kind === 'snow') {
+        mover.object.position.y = mover.startY - ((elapsed * 0.42 + mover.phase) % mover.span);
+        if (mover.object.position.y < 0.15) mover.object.position.y += mover.span;
+        mover.object.position.x += Math.sin(elapsed * 0.7 + mover.phase) * 0.0015;
+      } else if (mover.kind === 'banner') mover.object.rotation.y = Math.sin(elapsed * 1.5 + mover.phase) * 0.12;
+      else if (mover.kind === 'torch') mover.object.scale.setScalar(0.88 + Math.sin(elapsed * 8 + mover.phase) * 0.14);
     });
     if (water) {
       water.position.y = -0.38 + Math.sin(elapsed * 0.72) * 0.018;

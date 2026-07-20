@@ -15,7 +15,7 @@ function factory(qualityTier = 'high') {
   return { scene, controller: createEnvironmentController({ scene, hemi, sun, mat, box, cyl, sph, qualityTier }) };
 }
 
-test('三个主题构建不同环境并可完整释放', () => {
+test('七个主题构建不同环境并可完整释放', () => {
   const layout = { w: 5, h: 5, cells: Array(25).fill('.').map((v, i) => i % 5 === 2 ? 'C' : v) };
   for (const theme of Object.values(MAP_THEMES)) {
     const { scene, controller } = factory(); const parent = new THREE.Group(); scene.add(parent);
@@ -25,5 +25,31 @@ test('三个主题构建不同环境并可完整释放', () => {
     controller.updateEnvironment(1, 12);
     controller.dispose();
     assert.equal(parent.children.length, 0);
+  }
+});
+
+test('新地图使用独立标志性装饰，太空不生成云层', () => {
+  const layout = { w: 15, h: 10, cells: Array(150).fill('.') };
+  const expected = { snow: ['mountains', 'food-truck', 'snow-pines', 'snowfall'], space: ['starfield', 'ringed-planet', 'station-hull', 'isolation-chamber'], castle: ['towers', 'battlements', 'royal-banners', 'torches'] };
+  for (const id of Object.keys(expected)) {
+    const { scene, controller } = factory(); const parent = new THREE.Group(); scene.add(parent);
+    const environment = controller.buildEnvironment(parent, layout, MAP_THEMES[id]);
+    assert.deepEqual(environment.userData.landmarks, expected[id]);
+    assert.equal(environment.userData.cloudCount, id === 'space' ? 0 : 6);
+    controller.dispose();
+  }
+});
+
+test('新地图低画质保留主题且减少装饰数量', () => {
+  const layout = { w: 15, h: 10, cells: Array(150).fill('.') };
+  for (const id of ['snow', 'space', 'castle']) {
+    const high = factory('high'); const highParent = new THREE.Group(); high.scene.add(highParent);
+    const highEnvironment = high.controller.buildEnvironment(highParent, layout, MAP_THEMES[id]);
+    const highCount = highEnvironment.children.length; high.controller.dispose();
+    const low = factory('low'); const lowParent = new THREE.Group(); low.scene.add(lowParent);
+    const lowEnvironment = low.controller.buildEnvironment(lowParent, layout, MAP_THEMES[id]);
+    assert.deepEqual(lowEnvironment.userData.landmarks.length, 4);
+    assert.ok(lowEnvironment.children.length < highCount, `${id}: ${lowEnvironment.children.length} < ${highCount}`);
+    low.controller.updateEnvironment(1, 20); low.controller.dispose();
   }
 });
