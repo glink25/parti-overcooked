@@ -1,9 +1,14 @@
 name: release
+
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to rebuild and republish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,13 +16,34 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Validate release tag
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "release tag must start with v: $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+          test "$(node -p "require('./package.json').version")" = "${RELEASE_TAG#v}"
+          test "$(node -p "require('./public/parti.room.json').version")" = "${RELEASE_TAG#v}"
       - run: npm install
       - run: npm run build
+      - run: npm run verify
+      - name: Validate room package
+        run: |
+          test -f dist/parti.room.json
+          test -f dist/index.html
+          test -f dist/room.worker.js
+          test -f dist/cover.png
+          test "$(find dist -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
       - name: Package parti.room.zip
         working-directory: dist
         run: zip -r "$GITHUB_WORKSPACE/parti.room.zip" .
@@ -25,27 +51,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          [[ "$TAG" != v* ]] && TAG="v$(jq -r .version dist/parti.room.json)"
           cp dist/parti.room.json parti.room.json
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" parti.room.zip parti.room.json --clobber
-            gh release edit "$TAG" --latest
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" parti.room.zip parti.room.json --clobber
           else
-            gh release create "$TAG" parti.room.zip parti.room.json --title "$TAG" --generate-notes --latest
+            gh release create "$RELEASE_TAG" parti.room.zip parti.room.json \
+              --title "$RELEASE_TAG" --generate-notes
           fi
       - name: Publish dist/ to the parti-package branch
         run: |
+          publish_dir="$(mktemp -d)"
+          cp -R dist/. "$publish_dir/"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan parti-package-tmp
+          git checkout --orphan parti-package-publish
           git rm -rf . >/dev/null 2>&1 || true
-          # 关键：先把 dist 移出仓库，再 git clean 清掉 node_modules 等未跟踪文件，
-          # 否则孤儿分支会把 node_modules 一起提交（jsdelivr 判定包超限，市场无法安装）
-          TMPD="$(mktemp -d)"
-          cp -r dist "$TMPD/dist"
           git clean -fdx
-          cp -r "$TMPD/dist"/* .
+          cp -R "$publish_dir/." .
           git add -A
-          git commit -m "parti package ${GITHUB_REF_NAME}"
+          git commit -m "parti package $RELEASE_TAG"
           git push -f origin HEAD:parti-package

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as esbuild } from 'esbuild';
@@ -37,20 +37,6 @@ function workerBundle(outDir) {
           'export default $1;',
         ),
       );
-
-      // CI 发布兜底：老版 release workflow 的 parti-package 孤儿分支发布会把工作区
-      // 全部未跟踪文件 git add 进去（node_modules 曾因此被打进分支，jsdelivr 判定
-      // 包超 50MB，市场安装失败）。git rm 不会动 .git 目录，构建时把忽略规则追加到
-      // .git/info/exclude，publish 步骤的 git add -A 就会自动跳过这些路径。
-      try {
-        const gitInfoDir = path.resolve(appDir, '.git/info');
-        if (existsSync(gitInfoDir)) {
-          const excludeFile = path.join(gitInfoDir, 'exclude');
-          const rules = '\n# parti build: keep parti-package branch clean\nnode_modules/\ndist/\nparti.room.zip\npackage-lock.json\n';
-          const cur = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf8') : '';
-          if (!cur.includes('# parti build:')) appendFileSync(excludeFile, rules);
-        }
-      } catch { /* 非 git 环境则忽略 */ }
     },
   };
 }
