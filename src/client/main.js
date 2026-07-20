@@ -77,9 +77,9 @@ const MAP_META = [
   { id: 'classic', name: '经典厨房', ico: '🍳', desc: '左右对称的新手厨房，动线宽敞，适合磨合配合。' },
   { id: 'split',   name: '一线天',   ico: '🧱', desc: '台面高墙把厨房劈成两半，只有一条通道，记得隔空递菜！' },
   { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '灶台集中在中央环岛，菜谱齐备，订单更密更考验分工。' },
-  { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '狭长双工作区与中央交接台。' },
-  { id: 'space', name: '太空厨房', ico: '🚀', desc: '外围备料、中央烹饪，通过隔离舱交接台协作。' },
-  { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '双备餐区围绕皇家烹饪中心。' },
+  { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '冰面惯性延长刹车距离，干活可立即停稳。' },
+  { id: 'space', name: '太空厨房', ico: '🚀', desc: '台面食材会被预告并随机漂移，及时拿起可阻止。' },
+  { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '上下城门交替开放，随时改变左右半场路线。' },
 ];
 
 const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -132,6 +132,7 @@ const el = {
   roundVal: $('round-val'), rageChip: $('rage-chip'), rageVal: $('rage-val'),
   orders: $('orders'),
   carryChip: $('carry-chip'),
+  buffChip: $('buff-chip'), eventChip: $('event-chip'),
   hint: $('hint'),
   countdown: $('countdown'), countdownNum: $('countdown-num'),
   lobby: $('lobby'), modeCards: $('mode-cards'), lobbyPlayers: $('lobby-players'),
@@ -574,6 +575,8 @@ function buildStation(st) {
     node.iconBurnt.position.set(0, 1.86, 0);
     node.iconBurnt.visible = false;
     g.add(node.iconReady, node.iconBurnt);
+    node.fireIcon = makeIconSprite('🔥', '#ff5722'); node.fireIcon.position.set(-0.42, 1.72, 0); node.fireIcon.visible = false; g.add(node.fireIcon);
+    node.fireLight = new THREE.PointLight(0xff4b18, 0, 3.2); node.fireLight.position.set(0, 1.1, 0); g.add(node.fireLight);
     node.bar = makeProgressBar();
     node.bar.position.set(0, 1.5, 0);
     g.add(node.bar);
@@ -677,6 +680,8 @@ function disposeMap() {
   });
   mapGroup = null;
   stationNodes.clear();
+  groundBuffNode = null;
+  gateNodes.clear();
 }
 
 function buildMap(layout) {
@@ -728,6 +733,16 @@ function buildMap(layout) {
   floorMeshes.forEach((mesh, i) => { mesh.count = floorCounts[i]; mesh.receiveShadow = true; mapGroup.add(mesh); });
   mapGroup.add(wallMesh, trimMesh);
   environment.buildEnvironment(mapGroup, layout, activeTheme);
+
+  if (layout.mechanic && layout.mechanic.type === 'gate') {
+    for (const entry of layout.mechanic.gates) {
+      const gate = new THREE.Group(); gate.userData.id = entry.id;
+      const door = box(0.22, 1.3, 0.9, 0x8b6a45, { kind: 'wood', accent: 0xd6ae68 }); door.position.y = 0.65; gate.add(door);
+      for (const dz of [-0.36, 0.36]) { const bar = box(0.28, 1.42, 0.09, 0xe2b64e, { kind: 'metal' }); bar.position.set(0, 0.71, dz); gate.add(bar); }
+      const label = makeStationBadge(entry.id === 'top' ? '上门' : '下门', 0xffd36a); label.position.set(0, 1.5, 0); gate.add(label);
+      gate.position.set(entry.x + 0.5, entry.id === 'top' ? -1.7 : 0, entry.z + 0.5); gateNodes.set(entry.id, gate); mapGroup.add(gate);
+    }
+  }
 
   if (layout.mapId === 'awards') {
     const podiums = [{ x: 7.5, z: 2.4, h: 1.5, label: '1', color: 0xffd23f }, { x: 5.8, z: 2.7, h: 1.05, label: '2', color: 0xcbd3dc }, { x: 9.2, z: 2.8, h: 0.78, label: '3', color: 0xc88755 }];
@@ -822,6 +837,9 @@ function applyStations(state) {
 
     // 灶台
     if (node.type === 'stove') {
+      const overdrive = (state.fireOverdriveRemaining || 0) > 0;
+      node.fireIcon.visible = overdrive;
+      node.fireLight.intensity = overdrive ? 2.2 + Math.sin(perfNow * 12) * 0.55 : 0;
       const has = dyn.contents && dyn.contents.length > 0;
       node.contentsMesh.visible = has;
       if (has) {
@@ -943,6 +961,12 @@ function applyStations(state) {
 // 快照应用：玩家
 // ---------------------------------------------------------------------------
 const playerNodes = new Map(); // id -> { group, label, render:{x,z}, target:{x,z} }
+let groundBuffNode = null;
+const gateNodes = new Map();
+const BUFF_INFO = {
+  fast_hands: ['⚡', '快手', 0x55d6ff], master_chef: ['👨‍🍳', '厨神', 0xffd54f],
+  swift_feet: ['👟', '疾步', 0x69f0ae], fire_overdrive: ['🔥', '火力全开', 0xff5722],
+};
 let selfPos = null;      // 本地预测位置
 let serverSelf = null;   // 权威位置
 let selfInput = { dx: 0, dz: 0 };
@@ -959,14 +983,18 @@ function applyPlayers(state, dt) {
       const group = makeChefModel(p.color, { box, cyl, sph, mat });
       const label = makeNameSprite(p.name, p.color);
       group.add(label);
+      const buffRing = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.055, 6, 20), mat(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.7 }));
+      buffRing.rotation.x = Math.PI / 2; buffRing.position.y = 0.08; buffRing.visible = false; group.add(buffRing);
       scene.add(group);
       const yaw = p.face && (p.face.dx || p.face.dz) ? Math.atan2(p.face.dx, p.face.dz) : 0;
-      node = { group, render: { x: p.x, z: p.z }, target: { x: p.x, z: p.z }, label, state: p, yaw, targetYaw: yaw };
+      node = { group, render: { x: p.x, z: p.z }, target: { x: p.x, z: p.z }, label, buffRing, state: p, yaw, targetYaw: yaw };
       playerNodes.set(id, node);
     }
     node.state = p;
     node.target.x = p.x;
     node.target.z = p.z;
+    node.buffRing.visible = !!p.activeBuff;
+    if (p.activeBuff) node.buffRing.material.color.setHex(BUFF_INFO[p.activeBuff.type]?.[2] || 0xffffff);
 
     // 手持物
     const cJson = p.carrying ? JSON.stringify(p.carrying) : '';
@@ -1031,7 +1059,9 @@ function stepPrediction(dt) {
     const p = latestState.players[id];
     otherPlayers.push({ x: p.x, z: p.z, radius: PLAYER_R });
   }
-  stepMovement(builtLayout, selfPos, selfInput, dt, PLAYER_R, otherPlayers);
+  const me = latestState.players && latestState.players[myId];
+  const speedMultiplier = me?.activeBuff?.type === 'swift_feet' ? 1.25 : 1;
+  stepMovement(builtLayout, selfPos, selfInput, dt, PLAYER_R, otherPlayers, { speedMultiplier });
   reconcilePrediction(
     builtLayout,
     selfPos,
@@ -1334,6 +1364,20 @@ function applyHud(state) {
 
   // 手持提示
   const me = parti.playerId && state.players ? state.players[parti.playerId] : null;
+  if (me && me.activeBuff) {
+    const info = BUFF_INFO[me.activeBuff.type] || ['✨', me.activeBuff.type];
+    el.buffChip.textContent = `${info[0]} ${info[1]} ${Math.ceil(me.activeBuff.remaining)}s`;
+    el.buffChip.classList.remove('hidden');
+  } else el.buffChip.classList.add('hidden');
+  if ((state.fireOverdriveRemaining || 0) > 0) {
+    el.eventChip.textContent = `🔥 全场火力 ×2 · ${Math.ceil(state.fireOverdriveRemaining)}s`;
+    el.eventChip.classList.remove('hidden');
+  } else if (state.gate && state.gate.warning) {
+    const closing = state.gate.active === 'top' ? '上门' : '下门';
+    const opening = state.gate.active === 'top' ? '下门' : '上门';
+    el.eventChip.textContent = `⚠ ${closing}将关 · ${opening}将开 · ${Math.ceil(state.gate.remaining)}s`;
+    el.eventChip.classList.remove('hidden');
+  } else el.eventChip.classList.add('hidden');
   if (me && me.carrying) {
     const c = me.carrying;
     let text = '';
@@ -1345,6 +1389,34 @@ function applyHud(state) {
     el.carryChip.classList.remove('hidden');
   } else {
     el.carryChip.classList.add('hidden');
+  }
+}
+
+function applyWorldFeatures(state) {
+  if (!mapGroup) return;
+  if (state.groundBuff) {
+    if (!groundBuffNode || groundBuffNode.userData.type !== state.groundBuff.type) {
+      if (groundBuffNode) mapGroup.remove(groundBuffNode);
+      const info = BUFF_INFO[state.groundBuff.type] || ['✨', state.groundBuff.type, 0xffffff];
+      groundBuffNode = new THREE.Group(); groundBuffNode.userData.type = state.groundBuff.type;
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), mat(info[2], { emissive: info[2], emissiveIntensity: 0.75 })); gem.position.y = 0.45; groundBuffNode.add(gem);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 6, 24), mat(info[2], { emissive: info[2], emissiveIntensity: 0.55 })); ring.rotation.x = Math.PI / 2; ring.position.y = 0.12; groundBuffNode.add(ring);
+      const badge = makeStationBadge(`${info[0]} ${info[1]}`, info[2]); badge.position.y = 1.05; groundBuffNode.add(badge); mapGroup.add(groundBuffNode);
+    }
+    groundBuffNode.position.set(state.groundBuff.x, 0, state.groundBuff.z);
+    groundBuffNode.rotation.y = perfNow * 1.8;
+    groundBuffNode.visible = state.groundBuff.remaining > 5 || Math.floor(perfNow * 8) % 2 === 0;
+  } else if (groundBuffNode) { mapGroup.remove(groundBuffNode); groundBuffNode = null; }
+  if (gateNodes.size && state.gate) {
+    for (const [id, gate] of gateNodes) {
+      const open = state.gate.active === id;
+      gate.position.y = THREE.MathUtils.lerp(gate.position.y, open ? -1.7 : 0, 0.25);
+      gate.children.forEach((child) => { if (child.material?.emissive) child.material.emissiveIntensity = state.gate.warning && open ? 0.8 + Math.sin(perfNow * 10) * 0.5 : 0; });
+    }
+  }
+  for (const [key, node] of stationNodes) {
+    const warned = state.spaceEvent?.warning?.key === key;
+    if (node.itemAnchor) node.itemAnchor.scale.setScalar(warned ? 1.15 + Math.sin(perfNow * 10) * 0.12 : 1);
   }
 }
 
@@ -1559,6 +1631,10 @@ function applyAudioState(previous, state) {
 parti.onState((state) => {
   const previousState = latestState;
   latestState = state;
+  if (builtLayout && state.layout) {
+    builtLayout.dynamicBlocked = state.layout.dynamicBlocked || {};
+    builtLayout.movementProfile = state.layout.movementProfile || null;
+  }
   if (state.phase === 'countdown') {
     introCountdownValue = state.countdown || 0;
     introCountdownReceivedAt = performance.now();
@@ -1584,6 +1660,7 @@ parti.onState((state) => {
     applyHud(state);
     applyPlayers(state);
     applyStations(state);
+    applyWorldFeatures(state);
   }
   if (state.phase === 'roundResult') applyRoundResult(state);
   if (state.phase === 'awards') { applyAwards(state); applyPlayers(state); }
@@ -1609,6 +1686,11 @@ parti.onEvent('pot:burnt', () => {
   }
 });
 parti.onEvent('plate:dirty', () => { toast('脏盘子回到水槽了'); audio.playSfx('dirty'); });
+parti.onEvent('buff:spawn', () => { toast('✨ 地图上出现了稀有 Buff！'); audio.playSfx('orderNew'); });
+parti.onEvent('buff:picked', (p) => { const info = BUFF_INFO[p.type] || ['✨', p.type]; toast(`${p.by} 获得 ${info[0]}${info[1]}`, p.type === 'fire_overdrive' ? 'bad' : 'good'); audio.playSfx('pickup'); });
+parti.onEvent('space:warning', () => { toast('🛸 一份台面食材即将漂移！'); audio.playSfx('orderNew'); });
+parti.onEvent('space:teleport', () => { toast('🛸 食材已漂移到另一处台面'); audio.playSfx('place'); });
+parti.onEvent('gate:switch', (p) => { toast(`🏰 ${p.open === 'top' ? '上门开 · 下门关' : '下门开 · 上门关'}`); audio.playSfx('workDone'); });
 parti.onEvent('game:over', () => { audio.playSfx('over'); });
 parti.onEvent('player:joined', (p) => { toast(`${p.name} 加入了厨房`); audio.playSfx('join'); });
 parti.onEvent('__error', (p) => { parti.log('room error', p); });

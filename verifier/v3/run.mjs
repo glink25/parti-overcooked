@@ -432,6 +432,7 @@ section('经典厨房：完整做菜流程');
 
   // 同一种番茄在不同菜谱中处理要求不同，错误形态不能交付。
   const saladOrder = { id: 'prep-order', recipeId: 'garden_salad', key: 'lettuce:chopped+tomato:whole', items: [{ ingredient: 'lettuce', prep: 'chopped' }, { ingredient: 'tomato', prep: 'whole' }], name: '田园沙拉', points: 16, t: 70, total: 80 };
+  ctx.state.orders = ctx.state.orders.filter((order) => order.key !== saladOrder.key);
   ctx.state.orders.push(saladOrder);
   ctx.state.players.host.x = 7.5; ctx.state.players.host.z = 7.5; ctx.state.players.host.face = { dx: 0, dz: 1 };
   ctx.state.players.host.carrying = { k: 'dish', items: [{ ingredient: 'lettuce', prep: 'chopped' }, { ingredient: 'tomato', prep: 'chopped' }] };
@@ -524,6 +525,39 @@ section('环岛餐吧：全配方流程');
   ctx.state.timeLeft = 0.2;
   pump(ctx, 3);
   ok('ring 可正常结束', ctx.state.phase === 'awards');
+}
+
+section('地图特性与随机 Buff');
+{
+  const ctx = makeCtx(def, { seed: 31 }); createRoom(def, ctx); join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'snow' }); act(ctx, def, 'host', 'start'); pump(ctx, 31);
+  ok('雪山公开冰面移动参数', ctx.state.layout.movementProfile?.stopTime === 0.65 && ctx.state.layout.movementProfile?.turnTime === 0.25);
+  ctx.state.nextBuffIn = 0.05; pump(ctx, 1);
+  ok('Buff 生成在合法地面', !!ctx.state.groundBuff && ['fast_hands','master_chef','swift_feet','fire_overdrive'].includes(ctx.state.groundBuff.type));
+  const spawned = ctx.state.groundBuff; ctx.state.players.host.x = spawned.x; ctx.state.players.host.z = spawned.z; pump(ctx, 1);
+  ok('玩家走近自动拾取且场上清空', !!ctx.state.players.host.activeBuff && !ctx.state.groundBuff);
+  ctx.state.players.host.activeBuff = { type: 'fire_overdrive', remaining: 10 }; ctx.state.fireOverdriveRemaining = 10;
+  const potKey = Object.keys(ctx.state.stations).find((key) => ctx.state.stations[key].contents);
+  const pot = ctx.state.stations[potKey]; pot.contents = [{ ingredient: 'tomato', prep: 'chopped' }]; pot.phase = 'cooking'; pot.t = 0; pot.masterChef = true;
+  pump(ctx, 10);
+  ok('火力全开与厨神乘法加速烹饪', pot.t > 2.7 && pot.t < 2.9, `t=${pot.t}`);
+}
+{
+  const ctx = makeCtx(def, { seed: 37 }); createRoom(def, ctx); join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'space' }); act(ctx, def, 'host', 'start'); pump(ctx, 31);
+  const counters = Object.keys(ctx.state.layout.stationAt).filter((key) => ctx.state.layout.stationAt[key].type === 'counter');
+  const source = counters[0]; ctx.state.stations[source].item = { k: 'raw', g: 'tomato', progress: 0 }; ctx.state.spaceEvent.nextIn = 0.05; pump(ctx, 1);
+  ok('太空食材先进入三秒预告', ctx.state.spaceEvent.warning?.key === source);
+  pump(ctx, 31);
+  ok('太空食材传送且不丢失', !ctx.state.stations[source].item && counters.some((key) => ctx.state.stations[key].item?.g === 'tomato'));
+}
+{
+  const ctx = makeCtx(def, { seed: 41 }); createRoom(def, ctx); join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'selectMap', { mapId: 'castle' }); act(ctx, def, 'host', 'start'); pump(ctx, 31);
+  ctx.state.gate.remaining = 0.05; pump(ctx, 1);
+  ok('城门切换后仅开放下通道', ctx.state.gate.active === 'bottom' && ctx.state.layout.dynamicBlocked['7,3'] && !ctx.state.layout.dynamicBlocked['7,7']);
+  ctx.state.gate.remaining = 0.05; pump(ctx, 1);
+  ok('城门再次切换后仅开放上通道', ctx.state.gate.active === 'top' && !ctx.state.layout.dynamicBlocked['7,3'] && ctx.state.layout.dynamicBlocked['7,7']);
 }
 
 section('多局派对与无尽怒气');

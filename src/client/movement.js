@@ -9,6 +9,7 @@ const EPSILON = 1e-9;
 
 export function cellBlocked(layout, cx, cz) {
   if (cx < 0 || cz < 0 || cx >= layout.w || cz >= layout.h) return true;
+  if (layout.dynamicBlocked && layout.dynamicBlocked[cx + ',' + cz]) return true;
   return layout.cells[cz * layout.w + cx] !== '.';
 }
 
@@ -130,9 +131,13 @@ function normaliseInput(input) {
 }
 
 /** Mutates and returns { x, z, vx, vz }. */
-export function stepMovement(layout, state, input, dt, radius = PLAYER_R, otherPlayers = []) {
+export function stepMovement(layout, state, input, dt, radius = PLAYER_R, otherPlayers = [], modifiers = {}) {
   if (!layout || !state || !(dt > 0)) return state;
   const command = normaliseInput(input);
+  const profile = layout.movementProfile || {};
+  const speedLimit = (profile.speed || SPEED) * (modifiers.speedMultiplier || 1);
+  const deceleration = speedLimit / (profile.stopTime || STOP_TIME);
+  const turnTime = profile.turnTime || 0;
   state._movementRemainder = (Number(state._movementRemainder) || 0) + dt;
   // Fixed 60Hz slices make corner contacts deterministic across render rates
   // and match the six slices used by each 100ms authoritative tick.
@@ -142,8 +147,11 @@ export function stepMovement(layout, state, input, dt, radius = PLAYER_R, otherP
     let moveX;
     let moveZ;
     if (command.active) {
-      state.vx = command.dx * SPEED;
-      state.vz = command.dz * SPEED;
+      const targetVx = command.dx * speedLimit;
+      const targetVz = command.dz * speedLimit;
+      const blend = turnTime ? Math.min(1, FIXED_STEP / turnTime) : 1;
+      state.vx = (state.vx || 0) + (targetVx - (state.vx || 0)) * blend;
+      state.vz = (state.vz || 0) + (targetVz - (state.vz || 0)) * blend;
       moveX = state.vx * FIXED_STEP;
       moveZ = state.vz * FIXED_STEP;
     } else {
@@ -154,7 +162,7 @@ export function stepMovement(layout, state, input, dt, radius = PLAYER_R, otherP
         state._movementRemainder = 0;
         break;
       }
-      const nextSpeed = Math.max(0, speed - DECELERATION * FIXED_STEP);
+      const nextSpeed = Math.max(0, speed - deceleration * FIXED_STEP);
       const averageSpeed = (speed + nextSpeed) * 0.5;
       const dirX = state.vx / speed;
       const dirZ = state.vz / speed;

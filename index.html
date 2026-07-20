@@ -47,6 +47,8 @@
   @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
   #hud-sub { display: flex; gap: 6px; }
   #hud-sub .chip { font-size: 12px; padding: 3px 10px; border-width: 2px; font-weight: 700; }
+  #buff-chip, #event-chip { position: absolute; left: 50%; transform: translateX(-50%); top: 12px; font-size: 14px; }
+  #event-chip { top: 52px; background: rgba(150,35,20,.94); color: #fff4d0; border-color: #ffb02e; }
 
   #orders {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
@@ -318,6 +320,8 @@
     </div>
     <div id="orders"></div>
     <span class="chip hidden" id="carry-chip"></span>
+    <span class="chip hidden" id="buff-chip"></span>
+    <span class="chip hidden" id="event-chip"></span>
     <div id="hint"></div>
   </div>
 
@@ -325,7 +329,7 @@
 
   <div id="lobby" class="overlay">
     <div class="panel">
-      <h1>胡闹<span class="flame">厨房</span>派对</h1>
+      <h1>新手<span class="flame">上厨</span></h1>
       <div class="sub">2-4 人合作 · 切菜 · 煮汤 · 装盘 · 上菜 · 洗碗</div>
       <div id="mode-cards"></div>
       <div id="lobby-players"></div>

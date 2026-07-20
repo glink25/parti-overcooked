@@ -39,6 +39,11 @@ const ROUND_RESULT_T = 8;
 const RAGE_MAX = 100;
 const RAGE_EXPIRED = 25;
 const RAGE_SERVED = 5;
+const BUFF_TYPES = ['fast_hands', 'master_chef', 'swift_feet', 'fire_overdrive'];
+const BUFF_WEIGHTS = [2, 2, 2, 1];
+const BUFF_DURATION = 15;
+const BUFF_LIFETIME = 18;
+const FIRE_OVERDRIVE_DURATION = 10;
 
 const PLAYER_COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71'];
 const STAT_KEYS = ['chops', 'washes', 'assembles', 'potAdds', 'potPickups', 'deliveries', 'fastServes', 'clutchServes', 'burnClears', 'discards'];
@@ -284,7 +289,8 @@ const MAPS = {
     ],
   },
   snow: {
-    name: '雪山餐车', desc: '狭长双工作区与中央交接台。', plates: 5,
+    name: '雪山餐车', desc: '冰面惯性延长刹车距离，干活可立即停稳。', plates: 5,
+    movementProfile: { speed: SPEED, stopTime: 0.65, turnTime: 0.25 }, mechanic: { type: 'ice' },
     pool: ['potato_soup','mushroom_soup','cheese_potato_soup','mushroom_meat_soup','cheese_salad'],
     grid: [
       '#######W#######', '#V.M.H...L.TAO#', '#.1..C....2...#', '#B.B...C..B.B.#',
@@ -292,7 +298,8 @@ const MAPS = {
     ],
   },
   space: {
-    name: '太空厨房', desc: '环形工作区与分散食材舱。', plates: 5,
+    name: '太空厨房', desc: '台面食材会被预告并随机漂移。', plates: 5,
+    mechanic: { type: 'floating_food', interval: 25, warning: 3 },
     pool: ['golden_risotto','mushroom_risotto','meat_sauce_soup','power_salad','party_platter'],
     grid: [
       '#######W#######', '#I...P...P...A#', '#.1.........3.#', '#T.B..CCCCC..B#',
@@ -300,11 +307,12 @@ const MAPS = {
     ],
   },
   castle: {
-    name: '城堡宴会厅', desc: '左右备餐区、中央烹饪区和远端出菜口。', plates: 5,
+    name: '城堡宴会厅', desc: '上下城门交替开放，随时改变左右半场路线。', plates: 5,
+    mechanic: { type: 'gate', gates: [{ id: 'top', x: 7, z: 3 }, { id: 'bottom', x: 7, z: 7 }], switchTime: 15, warning: 3 },
     pool: ['garden_stew','deluxe_salad','meat_sauce_soup','cheese_potato_soup','golden_risotto','cheese_salad','party_platter'],
     grid: [
-      '#######W#######', '#T.O.H..I.M.A.#', '#..1.......2..#', '#B.C...P...C.B#',
-      '#....C.S.S.C..#', '#K...C..X..C.K#', '#B.C...P...C.B#', '#..3.......4..#', '#L.U.R.....V..#', '###############',
+      '##W#########W##', '#T.O.H.#I.MA..#', '#..1...#...2..#', '#B.C...D...C.B#',
+      '#..P.C.#.C.P..#', '#K...S.#.S...K#', '#.3X.C.#.C.X4.#', '#B.C...D...C.B#', '#L.U.R.#..V...#', '###############',
     ],
   },
 };
@@ -337,13 +345,14 @@ function parseMap(mapId) {
       else if (ch === 'K') { cell = 'K'; st = { x, z, type: 'sink' }; }
       else if (ch === 'W') { cell = 'W'; st = { x, z, type: 'window' }; }
       else if (ch === 'X') { cell = 'X'; st = { x, z, type: 'trash' }; }
+      else if (ch === 'D') { cell = '.'; }
       else if (CRATES[ch]) { cell = 'G'; st = { x, z, type: 'crate', crate: CRATES[ch] }; }
       cells[z * w + x] = cell;
       if (st) stationAt[x + ',' + z] = st;
     }
   }
   spawns.sort((a, b) => a.slot - b.slot);
-  return { mapId, name: map.name, w, h, cells, spawns, stationAt };
+  return { mapId, name: map.name, w, h, cells, spawns, stationAt, movementProfile: map.movementProfile || null, mechanic: map.mechanic || null, dynamicBlocked: {} };
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +360,7 @@ function parseMap(mapId) {
 // ---------------------------------------------------------------------------
 function isBlocked(L, cx, cz) {
   if (cx < 0 || cz < 0 || cx >= L.w || cz >= L.h) return true;
+  if (L.dynamicBlocked && L.dynamicBlocked[cx + ',' + cz]) return true;
   return L.cells[cz * L.w + cx] !== '.';
 }
 
@@ -440,6 +450,10 @@ function stepPlayerMovement(L, p, input, dt, otherPlayers) {
   const ix = Number(input && input.dx) || 0;
   const iz = Number(input && input.dz) || 0;
   const active = ix !== 0 || iz !== 0;
+  const profile = L.movementProfile || {};
+  const speedLimit = (profile.speed || SPEED) * (p.activeBuff && p.activeBuff.type === 'swift_feet' ? 1.25 : 1);
+  const deceleration = speedLimit / (profile.stopTime || STOP_TIME);
+  const turnTime = profile.turnTime || 0;
   const steps = Math.max(1, Math.round(dt / MOVE_FIXED_STEP));
   const stepDt = dt / steps;
 
@@ -447,8 +461,11 @@ function stepPlayerMovement(L, p, input, dt, otherPlayers) {
     let moveX;
     let moveZ;
     if (active) {
-      p.vx = ix * SPEED;
-      p.vz = iz * SPEED;
+      const targetVx = ix * speedLimit;
+      const targetVz = iz * speedLimit;
+      const blend = turnTime ? Math.min(1, stepDt / turnTime) : 1;
+      p.vx = (p.vx || 0) + (targetVx - (p.vx || 0)) * blend;
+      p.vz = (p.vz || 0) + (targetVz - (p.vz || 0)) * blend;
       moveX = p.vx * stepDt;
       moveZ = p.vz * stepDt;
     } else {
@@ -458,7 +475,7 @@ function stepPlayerMovement(L, p, input, dt, otherPlayers) {
         p.vz = 0;
         break;
       }
-      const nextSpeed = Math.max(0, speed - DECELERATION * stepDt);
+      const nextSpeed = Math.max(0, speed - deceleration * stepDt);
       const averageSpeed = (speed + nextSpeed) * 0.5;
       const dirX = p.vx / speed;
       const dirZ = p.vz / speed;
@@ -560,6 +577,7 @@ function resetPlayerForLayout(p, sp) {
   p.x = sp.x + 0.5; p.z = sp.z + 0.5;
   p.input = { dx: 0, dz: 0 }; p.vx = 0; p.vz = 0; p.moveSeq = 0;
   p.face = { dx: 0, dz: 1 }; p.carrying = null; p.working = false;
+  p.activeBuff = null;
   p.roundContributionScore = 0; p.roundServed = 0; p.roundPublicEvents = 0; p.roundStats = emptyStats();
 }
 
@@ -662,7 +680,7 @@ function setupRound(ctx) {
   for (const k in layout.stationAt) {
     const st = layout.stationAt[k];
     if (st.type === 'counter' || st.type === 'board') s.stations[k] = { item: null };
-    else if (st.type === 'stove') s.stations[k] = { contents: [], credits: [], phase: 'idle', t: 0 };
+    else if (st.type === 'stove') s.stations[k] = { contents: [], credits: [], phase: 'idle', t: 0, masterChef: false };
   }
   s.roundScore = 0;
   s.roundServed = 0;
@@ -675,6 +693,15 @@ function setupRound(ctx) {
   s.plates = { clean: map.plates, dirty: 0, washT: 0, due: [], cleanCredits: [] };
   s.timeLeft = GAME_TIME;
   s.nextOrderIn = ORDER_FIRST;
+  s.groundBuff = null;
+  s.nextBuffIn = 25;
+  s.fireOverdriveRemaining = 0;
+  s.spaceEvent = { nextIn: map.mechanic?.type === 'floating_food' ? map.mechanic.interval : 0, warning: null };
+  s.gate = map.mechanic?.type === 'gate' ? { active: 'top', remaining: map.mechanic.switchTime, warning: false } : null;
+  if (s.gate) {
+    const closed = map.mechanic.gates.find((gate) => gate.id !== s.gate.active);
+    layout.dynamicBlocked[closed.x + ',' + closed.z] = true;
+  }
   const ids = Object.keys(s.players);
   for (let i = 0; i < ids.length; i++) {
     const p = s.players[ids[i]];
@@ -745,10 +772,95 @@ function finishRound(ctx) {
   ctx.broadcast('round:over', { round: s.roundIndex, nextMapId: s.nextMapId, nextMapName: MAPS[s.nextMapId].name });
 }
 
+function weightedBuff(ctx) {
+  let pick = ctx.random() * BUFF_WEIGHTS.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < BUFF_TYPES.length; i++) { pick -= BUFF_WEIGHTS[i]; if (pick <= 0) return BUFF_TYPES[i]; }
+  return BUFF_TYPES[0];
+}
+
+function spawnGroundBuff(ctx) {
+  const s = ctx.state; const L = s.layout; const candidates = [];
+  for (let z = 1; z < L.h - 1; z++) for (let x = 1; x < L.w - 1; x++) {
+    if (isBlocked(L, x, z)) continue;
+    if (L.spawns.some((sp) => Math.hypot(x - sp.x, z - sp.z) < 1.5)) continue;
+    if (Object.values(s.players).some((p) => Math.hypot(x + 0.5 - p.x, z + 0.5 - p.z) < 2)) continue;
+    const exits = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dz]) => !isBlocked(L, x + dx, z + dz)).length;
+    if (exits < 2) continue;
+    candidates.push({ x: x + 0.5, z: z + 0.5 });
+  }
+  if (!candidates.length) { s.nextBuffIn = 10; return; }
+  const pos = candidates[Math.floor(ctx.random() * candidates.length)];
+  s.groundBuff = { type: weightedBuff(ctx), ...pos, remaining: BUFF_LIFETIME };
+  ctx.broadcast('buff:spawn', { type: s.groundBuff.type });
+}
+
+function stepBuffs(ctx) {
+  const s = ctx.state;
+  for (const p of Object.values(s.players)) {
+    if (p.activeBuff) { p.activeBuff.remaining = Math.max(0, p.activeBuff.remaining - DT); if (!p.activeBuff.remaining) p.activeBuff = null; }
+  }
+  if (s.fireOverdriveRemaining > 0) s.fireOverdriveRemaining = Math.max(0, s.fireOverdriveRemaining - DT);
+  if (s.groundBuff) {
+    s.groundBuff.remaining -= DT;
+    const picker = Object.values(s.players).find((p) => Math.hypot(p.x - s.groundBuff.x, p.z - s.groundBuff.z) <= 0.55);
+    if (picker) {
+      const type = s.groundBuff.type;
+      picker.activeBuff = { type, remaining: type === 'fire_overdrive' ? FIRE_OVERDRIVE_DURATION : BUFF_DURATION };
+      if (type === 'fire_overdrive') s.fireOverdriveRemaining = FIRE_OVERDRIVE_DURATION;
+      s.groundBuff = null; s.nextBuffIn = 35 + ctx.random() * 15;
+      ctx.broadcast('buff:picked', { type, by: picker.name });
+    } else if (s.groundBuff.remaining <= 0) { s.groundBuff = null; s.nextBuffIn = 35 + ctx.random() * 15; }
+  } else {
+    s.nextBuffIn -= DT;
+    if (s.nextBuffIn <= 0) spawnGroundBuff(ctx);
+  }
+}
+
+function stepMapMechanic(ctx) {
+  const s = ctx.state; const mechanic = s.layout.mechanic;
+  if (!mechanic) return;
+  if (mechanic.type === 'floating_food') {
+    if (s.spaceEvent.warning) {
+      s.spaceEvent.warning.remaining -= DT;
+      const key = s.spaceEvent.warning.key; const dyn = s.stations[key];
+      if (!dyn || !dyn.item || dyn.item !== s.spaceEvent.warning.item) s.spaceEvent.warning = null;
+      else if (s.spaceEvent.warning.remaining <= 0) {
+        const empty = Object.keys(s.layout.stationAt).filter((k) => s.layout.stationAt[k].type === 'counter' && k !== key && s.stations[k] && !s.stations[k].item);
+        if (empty.length) { const dest = empty[Math.floor(ctx.random() * empty.length)]; s.stations[dest].item = dyn.item; dyn.item = null; ctx.broadcast('space:teleport', {}); }
+        s.spaceEvent.warning = null;
+      }
+    } else {
+      s.spaceEvent.nextIn -= DT;
+      if (s.spaceEvent.nextIn <= 0) {
+        const eligible = Object.keys(s.layout.stationAt).filter((k) => s.layout.stationAt[k].type === 'counter' && s.stations[k]?.item && ['raw','chopped'].includes(s.stations[k].item.k));
+        if (eligible.length) { const key = eligible[Math.floor(ctx.random() * eligible.length)]; s.spaceEvent.warning = { key, remaining: mechanic.warning, item: s.stations[key].item }; ctx.broadcast('space:warning', { key }); }
+        s.spaceEvent.nextIn = mechanic.interval;
+      }
+    }
+  } else if (mechanic.type === 'gate') {
+    const gate = s.gate; gate.remaining -= DT;
+    gate.warning = gate.remaining <= mechanic.warning;
+    if (gate.remaining <= 0) {
+      const closing = mechanic.gates.find((entry) => entry.id === gate.active);
+      const occupied = Object.values(s.players).some((p) => Math.hypot(p.x - (closing.x + 0.5), p.z - (closing.z + 0.5)) < 0.9);
+      if (occupied) gate.remaining = 0.5;
+      else {
+        const opening = mechanic.gates.find((entry) => entry.id !== gate.active);
+        s.layout.dynamicBlocked[closing.x + ',' + closing.z] = true;
+        delete s.layout.dynamicBlocked[opening.x + ',' + opening.z];
+        gate.active = opening.id; gate.remaining = mechanic.switchTime; gate.warning = false;
+        ctx.broadcast('gate:switch', { open: opening.id, closed: closing.id });
+      }
+    }
+  }
+}
+
 function stepGame(ctx) {
   const s = ctx.state;
   const L = s.layout;
   const playerIds = Object.keys(s.players);
+  stepBuffs(ctx);
+  stepMapMechanic(ctx);
 
   // --- 玩家：工作（切菜/洗碗）与移动 ---
   for (const id of playerIds) {
@@ -759,7 +871,8 @@ function stepGame(ctx) {
       if (st && st.type === 'board') {
         const dyn = s.stations[st.x + ',' + st.z];
         if (dyn && dyn.item && dyn.item.k === 'raw' && INGREDIENTS[dyn.item.g]?.choppable) {
-          dyn.item.progress = (dyn.item.progress || 0) + DT;
+          const rate = p.activeBuff && p.activeBuff.type === 'fast_hands' ? 1.5 : 1;
+          dyn.item.progress = (dyn.item.progress || 0) + DT * rate;
           if (dyn.item.progress >= CHOP_TIME) {
             dyn.item = { ...dyn.item, k: 'chopped', progress: 0 };
             addCredit(dyn.item, id, 1, false);
@@ -769,7 +882,8 @@ function stepGame(ctx) {
         }
       } else if (st && st.type === 'sink') {
         if (!p.carrying && s.plates.dirty > 0) {
-          s.plates.washT += DT;
+          const rate = p.activeBuff && p.activeBuff.type === 'fast_hands' ? 1.5 : 1;
+          s.plates.washT += DT * rate;
           if (s.plates.washT >= WASH_TIME) {
             s.plates.washT = 0;
             s.plates.dirty -= 1;
@@ -802,7 +916,8 @@ function stepGame(ctx) {
     const pot = s.stations[k];
     if (!pot.contents) continue;
     if (pot.phase === 'cooking') {
-      pot.t += DT;
+      const heat = s.fireOverdriveRemaining > 0 ? 2 : 1;
+      pot.t += DT * heat * (pot.masterChef ? 1.4 : 1);
       if (pot.t >= COOK_TIME) {
         pot.phase = 'ready';
         pot.t = 0;
@@ -810,10 +925,11 @@ function stepGame(ctx) {
         ctx.broadcast('pot:ready', { x: st.x, z: st.z });
       }
     } else if (pot.phase === 'ready') {
-      pot.t += DT;
+      pot.t += DT * (s.fireOverdriveRemaining > 0 ? 2 : 1);
       if (pot.t >= BURN_TIME) {
         pot.phase = 'burnt';
         pot.t = 0;
+        pot.masterChef = false;
         s.burns = (s.burns || 0) + 1;
         s.roundBurns = (s.roundBurns || 0) + 1;
         const st = L.stationAt[k];
@@ -931,6 +1047,7 @@ function doInteract(ctx, p) {
       if (!COOKABLE.has(c.g)) return; // 生菜/黄瓜等不能下锅（客户端气泡会提示）
       pot.contents.push(itemRequirement(c));
       pot.credits.push(...mergeCredits(c));
+      if (p.activeBuff && p.activeBuff.type === 'master_chef') pot.masterChef = true;
       addCredit(pot, playerIdFor(s, p), 2, true);
       bumpStat(p, 'potAdds');
       p.carrying = null;
@@ -941,6 +1058,7 @@ function doInteract(ctx, p) {
       } else if (pot.contents.length >= 3) {
         pot.phase = 'burnt';
         pot.t = 0;
+        pot.masterChef = false;
         s.burns = (s.burns || 0) + 1;
         s.roundBurns = (s.roundBurns || 0) + 1;
         ctx.broadcast('pot:burnt', { x: st.x, z: st.z });
@@ -951,6 +1069,7 @@ function doInteract(ctx, p) {
       bumpStat(p, 'potPickups');
       pot.contents = [];
       pot.credits = [];
+      pot.masterChef = false;
       pot.phase = 'idle';
       pot.t = 0;
     } else if (!c && pot.contents.length > 0 && (pot.phase === 'idle' || pot.phase === 'burnt')) {
@@ -958,6 +1077,7 @@ function doInteract(ctx, p) {
       if (pot.phase === 'burnt') bumpStat(p, 'burnClears');
       pot.contents = [];
       pot.credits = [];
+      pot.masterChef = false;
       pot.phase = 'idle';
       pot.t = 0;
     }
@@ -1059,6 +1179,11 @@ export default defineRoom({
       nextOrderIn: 0,
       plates: { clean: 0, dirty: 0, washT: 0, due: [], cleanCredits: [] },
       orderSeq: 0,
+      groundBuff: null,
+      nextBuffIn: 25,
+      fireOverdriveRemaining: 0,
+      spaceEvent: { nextIn: 0, warning: null },
+      gate: null,
     };
   },
 
@@ -1075,11 +1200,29 @@ export default defineRoom({
     if (!s.finalTitles) s.finalTitles = {};
     if (!Number.isFinite(s.burns)) s.burns = 0;
     if (!Number.isFinite(s.roundBurns)) s.roundBurns = 0;
+    if (!Number.isFinite(s.nextBuffIn)) s.nextBuffIn = 25;
+    if (!Number.isFinite(s.fireOverdriveRemaining)) s.fireOverdriveRemaining = 0;
+    if (!s.spaceEvent) s.spaceEvent = { nextIn: 0, warning: null };
+    if (s.layout) {
+      if (!s.layout.dynamicBlocked) s.layout.dynamicBlocked = {};
+      const map = MAPS[s.mapId];
+      if (!s.layout.movementProfile) s.layout.movementProfile = map?.movementProfile || null;
+      if (!s.layout.mechanic) s.layout.mechanic = map?.mechanic || null;
+      if (s.layout.mechanic?.type === 'gate') {
+        if (!s.gate || !['top', 'bottom'].includes(s.gate.active)) s.gate = { active: 'top', remaining: s.layout.mechanic.switchTime, warning: false };
+        for (const entry of s.layout.mechanic.gates) {
+          if (entry.id === s.gate.active) delete s.layout.dynamicBlocked[entry.x + ',' + entry.z];
+          else s.layout.dynamicBlocked[entry.x + ',' + entry.z] = true;
+        }
+      }
+    }
+    for (const pot of Object.values(s.stations || {})) if (pot.contents && typeof pot.masterChef !== 'boolean') pot.masterChef = false;
     for (const id in ctx.state.players || {}) {
       const p = ctx.state.players[id];
       if (!Number.isFinite(p.vx)) p.vx = 0;
       if (!Number.isFinite(p.vz)) p.vz = 0;
       if (!Number.isSafeInteger(p.moveSeq)) p.moveSeq = 0;
+      if (!p.activeBuff || !BUFF_TYPES.includes(p.activeBuff.type) || !Number.isFinite(p.activeBuff.remaining)) p.activeBuff = null;
       p.stats = normalizeStats(p.stats || ctx.state.playerRecords?.[id]?.stats);
       p.roundStats = normalizeStats(p.roundStats);
     }
@@ -1105,6 +1248,7 @@ export default defineRoom({
       face: { dx: 0, dz: 1 },
       carrying: null,
       working: false,
+      activeBuff: null,
       contributionScore: s.playerRecords[player.id]?.contributionScore || 0,
       roundContributionScore: 0,
       servedCount: s.playerRecords[player.id]?.servedCount || 0,
