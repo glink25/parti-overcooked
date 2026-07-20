@@ -1,7 +1,7 @@
 {
   "name": "parti-overcooked",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.2",
   "type": "module",
   "description": "Low-poly 3D co-op cooking chaos room for Parti (2-4 players)",
   "scripts": {
