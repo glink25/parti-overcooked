@@ -5,13 +5,11 @@
 //  - 交互 DOM 节点保持稳定，不在快照回调里重建（docs/room-dev-harness.md）
 import * as THREE from 'three';
 import demoStateJson from './demoState.json';
+import { PLAYER_R, reconcilePrediction, stepMovement } from './movement.js';
 
 // ---------------------------------------------------------------------------
 // 常量（与 worker 约定的展示层数据）
 // ---------------------------------------------------------------------------
-const PLAYER_R = 0.3;
-const SPEED = 3.2;
-
 const ING = {
   tomato:   { color: 0xe53935, name: '番茄' },
   onion:    { color: 0xd9a7d8, name: '洋葱' },
@@ -804,6 +802,7 @@ const playerNodes = new Map(); // id -> { group, label, render:{x,z}, target:{x,
 let selfPos = null;      // 本地预测位置
 let serverSelf = null;   // 权威位置
 let selfInput = { dx: 0, dz: 0 };
+let lastMoveDirection = { dx: 0, dz: 0 };
 
 function applyPlayers(state, dt) {
   const seen = new Set();
@@ -863,33 +862,20 @@ function applyPlayers(state, dt) {
   // 本机预测位置跟踪
   const me = myId && state.players[myId];
   if (me) {
-    serverSelf = { x: me.x, z: me.z };
-    if (!selfPos) selfPos = { x: me.x, z: me.z };
+    serverSelf = {
+      x: me.x,
+      z: me.z,
+      vx: Number(me.vx) || 0,
+      vz: Number(me.vz) || 0,
+      moveSeq: Number.isSafeInteger(me.moveSeq) ? me.moveSeq : 0,
+    };
+    if (!selfPos) {
+      selfPos = { x: me.x, z: me.z, vx: serverSelf.vx, vz: serverSelf.vz, _movementRemainder: 0 };
+    }
   } else {
     serverSelf = null;
     selfPos = null;
   }
-}
-
-// 与 worker 一致的碰撞（客户端预测用）
-function cellBlocked(layout, cx, cz) {
-  if (cx < 0 || cz < 0 || cx >= layout.w || cz >= layout.h) return true;
-  return layout.cells[cz * layout.w + cx] !== '.';
-}
-function collides(layout, x, z, r) {
-  const cx = Math.floor(x);
-  const cz = Math.floor(z);
-  for (let j = cz - 1; j <= cz + 1; j++) {
-    for (let i = cx - 1; i <= cx + 1; i++) {
-      if (!cellBlocked(layout, i, j)) continue;
-      const nx = Math.max(i, Math.min(x, i + 1));
-      const nz = Math.max(j, Math.min(z, j + 1));
-      const dx = x - nx;
-      const dz = z - nz;
-      if (dx * dx + dz * dz < r * r) return true;
-    }
-  }
-  return false;
 }
 
 function stepPrediction(dt) {
@@ -897,24 +883,27 @@ function stepPrediction(dt) {
   const ix = selfInput.dx;
   const iz = selfInput.dz;
   if (ix || iz) {
-    const nx = selfPos.x + ix * SPEED * dt;
-    if (!collides(builtLayout, nx, selfPos.z, PLAYER_R)) selfPos.x = nx;
-    const nz = selfPos.z + iz * SPEED * dt;
-    if (!collides(builtLayout, selfPos.x, nz, PLAYER_R)) selfPos.z = nz;
+    const len = Math.hypot(ix, iz);
+    lastMoveDirection = { dx: ix / len, dz: iz / len };
   }
-  if (serverSelf) {
-    const ex = serverSelf.x - selfPos.x;
-    const ez = serverSelf.z - selfPos.z;
-    const err = Math.hypot(ex, ez);
-    if (err > 1.5) {
-      selfPos.x = serverSelf.x;
-      selfPos.z = serverSelf.z;
-    } else if (err > 0.001) {
-      const k = Math.min(1, dt * 2.2);
-      selfPos.x += ex * k;
-      selfPos.z += ez * k;
-    }
+  const myId = parti.playerId;
+  const otherPlayers = [];
+  for (const id in latestState.players || {}) {
+    if (id === myId) continue;
+    const p = latestState.players[id];
+    otherPlayers.push({ x: p.x, z: p.z, radius: PLAYER_R });
   }
+  stepMovement(builtLayout, selfPos, selfInput, dt, PLAYER_R, otherPlayers);
+  reconcilePrediction(
+    builtLayout,
+    selfPos,
+    serverSelf,
+    selfInput,
+    lastMoveDirection,
+    lastSentMove.seq,
+    dt,
+    PLAYER_R,
+  );
 }
 
 function interpolatePlayers(dt) {
@@ -1324,7 +1313,7 @@ parti.onEvent('__error', (p) => { parti.log('room error', p); });
 // 输入：键盘
 // ---------------------------------------------------------------------------
 const keysDown = new Set();
-let lastSentMove = { dx: 0, dz: 0 };
+let lastSentMove = { dx: 0, dz: 0, seq: 0 };
 let workHeld = false;
 
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
@@ -1352,8 +1341,9 @@ function setWork(on) {
 
 function sendMove(v) {
   if (Math.abs(v.dx - lastSentMove.dx) < 0.001 && Math.abs(v.dz - lastSentMove.dz) < 0.001) return;
-  lastSentMove = { dx: v.dx, dz: v.dz };
-  parti.action('move', { dx: v.dx, dz: v.dz });
+  const seq = lastSentMove.seq + 1;
+  lastSentMove = { dx: v.dx, dz: v.dz, seq };
+  parti.action('move', { dx: v.dx, dz: v.dz, seq });
 }
 
 window.addEventListener('keydown', (e) => {

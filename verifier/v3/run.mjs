@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRoomDefinition, makeCtx, createRoom, join, leave, act, pump, lastEvents, walkTo } from './harness.mjs';
+import { collides, reconcilePrediction, stepMovement } from '../../src/client/movement.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SRC_ONLY = process.argv.includes('--src');
@@ -55,7 +56,129 @@ function workerContract(file, label) {
 const def = workerContract(path.join(root, 'src/worker/index.js'), '源码');
 
 // ---------------------------------------------------------------------------
-// 3. Worker 逻辑全流程模拟
+// 3. 移动、滑墙与客户端预测
+// ---------------------------------------------------------------------------
+section('移动手感与碰撞');
+{
+  const makeLayout = (rows) => ({
+    w: rows[0].length,
+    h: rows.length,
+    cells: rows.join('').split(''),
+    stationAt: {},
+  });
+  const openWithPillar = makeLayout([
+    '#######',
+    '#.....#',
+    '#.....#',
+    '#..#..#',
+    '#.....#',
+    '#.....#',
+    '#######',
+  ]);
+  const verticalWall = makeLayout([
+    '#######',
+    '#..#..#',
+    '#..#..#',
+    '#..#..#',
+    '#..#..#',
+    '#..#..#',
+    '#######',
+  ]);
+
+  const headOn = { x: 2.5, z: 3.5, vx: 0, vz: 0 };
+  for (let i = 0; i < 30; i++) stepMovement(openWithPillar, headOn, { dx: 1, dz: 0 }, 1 / 60);
+  ok('正面撞墙不穿透', headOn.x <= 2.700001 && !collides(openWithPillar, headOn.x, headOn.z));
+
+  const slide = { x: 2.65, z: 2.2, vx: 0, vz: 0 };
+  const slideStartZ = slide.z;
+  for (let i = 0; i < 35; i++) stepMovement(verticalWall, slide, { dx: 1, dz: 1 }, 1 / 60);
+  ok('斜向接触保留滑墙速度', slide.z > slideStartZ + 0.8 && !collides(verticalWall, slide.x, slide.z), JSON.stringify(slide));
+
+  const corridor = makeLayout([
+    '#######',
+    '#.#.#.#',
+    '#.#.#.#',
+    '#.#.#.#',
+    '#.#.#.#',
+    '#.#.#.#',
+    '#######',
+  ]);
+  for (const startX of [3.5, 3.34, 3.66]) {
+    const chef = { x: startX, z: 1.5, vx: 0, vz: 0 };
+    for (let i = 0; i < 65; i++) stepMovement(corridor, chef, { dx: 0, dz: 1 }, 1 / 60);
+    ok(`一格通道可通过 x=${startX}`, chef.z > 4.5 && !collides(corridor, chef.x, chef.z), JSON.stringify(chef));
+  }
+  const blockedChef = { x: 3.5, z: 1.5, vx: 0, vz: 0 };
+  const corridorBlocker = { x: 3.5, z: 3, radius: 0.3 };
+  for (let i = 0; i < 60; i++) {
+    stepMovement(corridor, blockedChef, { dx: 0, dz: 1 }, 1 / 60, 0.3, [corridorBlocker]);
+  }
+  ok('静止玩家可以堵住一格通道', blockedChef.z <= corridorBlocker.z - 0.599,
+    JSON.stringify({ blockedChef, corridorBlocker }));
+
+  const fine = { x: 1.5, z: 2.25, vx: 0, vz: 0 };
+  const coarse = { ...fine };
+  for (let i = 0; i < 60; i++) stepMovement(openWithPillar, fine, { dx: 1, dz: 0.35 }, 1 / 60);
+  for (let i = 0; i < 10; i++) stepMovement(openWithPillar, coarse, { dx: 1, dz: 0.35 }, 0.1);
+  ok('60Hz 与 10Hz 求解结果一致', Math.hypot(fine.x - coarse.x, fine.z - coarse.z) < 0.03,
+    JSON.stringify({ fine, coarse }));
+
+  const stopping = { x: 1.5, z: 1.5, vx: 0, vz: 0 };
+  stepMovement(openWithPillar, stopping, { dx: 1, dz: 0 }, 0.1);
+  const positions = [stopping.x];
+  for (let i = 0; i < 6; i++) {
+    stepMovement(openWithPillar, stopping, { dx: 0, dz: 0 }, 1 / 60);
+    positions.push(stopping.x);
+  }
+  ok('松键减速不产生反向位移', positions.every((x, i) => i === 0 || x >= positions[i - 1] - 1e-9));
+  ok('松键后 100ms 内速度归零', Math.hypot(stopping.vx, stopping.vz) < 1e-9);
+
+  const predicted = { x: 2, z: 2, vx: 0, vz: 0 };
+  reconcilePrediction(openWithPillar, predicted,
+    { x: 1.9, z: 2, vx: 0, vz: 0, moveSeq: 2 },
+    { dx: 0, dz: 0 }, { dx: 1, dz: 0 }, 2, 1 / 60);
+  ok('停止后的旧位置不会反向回拉', Math.abs(predicted.x - 2) < 1e-9);
+
+  const ctx = makeCtx(def);
+  createRoom(def, ctx);
+  join(ctx, def, 'p2', '小明');
+  act(ctx, def, 'host', 'start');
+  pump(ctx, 31);
+  ctx.state.layout = openWithPillar;
+  ctx.state.stations = {};
+  const authoritative = ctx.state.players.host;
+  authoritative.x = 1.5;
+  authoritative.z = 2.25;
+  authoritative.vx = 0;
+  authoritative.vz = 0;
+  act(ctx, def, 'host', 'move', { dx: 1, dz: 0.35, seq: 41 });
+  for (let i = 0; i < 10; i++) pump(ctx, 1);
+  ok('Worker 与客户端移动求解一致', Math.hypot(fine.x - authoritative.x, fine.z - authoritative.z) < 0.03,
+    JSON.stringify({ fine, authoritative }));
+  ok('Worker 回传最新移动序号', authoritative.moveSeq === 41);
+  act(ctx, def, 'host', 'move', { dx: -1, dz: 0, seq: 40 });
+  ok('Worker 忽略乱序旧移动指令', authoritative.moveSeq === 41 && authoritative.input.dx > 0);
+  act(ctx, def, 'host', 'move', { dx: 0, dz: 0, seq: 42 });
+  const beforeStop = authoritative.x;
+  pump(ctx, 1);
+  ok('Worker 减速只沿原方向', authoritative.x >= beforeStop && Math.hypot(authoritative.vx, authoritative.vz) < 1e-9);
+
+  const opponent = ctx.state.players.p2;
+  authoritative.x = 2;
+  authoritative.z = 1.5;
+  opponent.x = 5;
+  opponent.z = 1.5;
+  authoritative.vx = authoritative.vz = opponent.vx = opponent.vz = 0;
+  act(ctx, def, 'host', 'move', { dx: 1, dz: 0, seq: 43 });
+  act(ctx, def, 'p2', 'move', { dx: -1, dz: 0, seq: 1 });
+  for (let i = 0; i < 10; i++) pump(ctx, 1);
+  ok('对向玩家相撞后不能互相穿过', authoritative.x < opponent.x
+    && Math.hypot(authoritative.x - opponent.x, authoritative.z - opponent.z) >= 0.599,
+  JSON.stringify({ authoritative, opponent }));
+}
+
+// ---------------------------------------------------------------------------
+// 4. Worker 逻辑全流程模拟
 // ---------------------------------------------------------------------------
 section('大厅与准入');
 {
@@ -102,6 +225,9 @@ section('经典厨房：完整做菜流程');
   ok('layout 尺寸 15x9', L.w === 15 && L.h === 9);
   ok('灶台动态已建', ctx.state.stations['10,5'] && ctx.state.stations['10,5'].phase === 'idle');
   ok('出生点落位', Math.floor(ctx.state.players.host.x) === 3 && Math.floor(ctx.state.players.host.z) === 2);
+  // 此段验证做菜流程，不让第二名玩家无意中占住灶台路线。
+  ctx.state.players.p2.x = 13.5;
+  ctx.state.players.p2.z = 2.5;
 
   // 越界移动钳制
   act(ctx, def, 'host', 'move', { dx: 999, dz: 0 });
@@ -134,6 +260,10 @@ section('经典厨房：完整做菜流程');
   tomatoRun();
   const pot = ctx.state.stations['10,5'];
   ok('3 番茄入锅开始烹饪', pot.phase === 'cooking' && pot.contents.length === 3);
+  // 给端盘玩家让出灶台正前方；玩家碰撞专项单独验证堵路行为。
+  walkTo(ctx, def, 'host', 10.5, 2.5);
+  walkTo(ctx, def, 'host', 10.5, 3.5);
+  walkTo(ctx, def, 'host', 9.5, 3.5);
 
   // p2：取盘子待命
   walkTo(ctx, def, 'p2', 7.5, 2.5, { dx: 0, dz: 1 });
@@ -239,6 +369,9 @@ section('一线天：地图分隔与通道');
   act(ctx, def, 'host', 'start');
   pump(ctx, 31);
   ok('split 开局', ctx.state.phase === 'playing' && ctx.state.layout.w === 15);
+  // 专项玩家阻挡已在移动测试覆盖；这里把同伴停到通道目标之外。
+  ctx.state.players.p2.x = 13.5;
+  ctx.state.players.p2.z = 4.5;
 
   // 直线穿越被台面墙挡住
   const arrived = walkTo(ctx, def, 'host', 11.5, 2.5, null, 300);

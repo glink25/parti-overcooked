@@ -17,6 +17,11 @@ const TICK_MS = 100;                 // 权威逻辑 tick 间隔（10Hz）
 const DT = TICK_MS / 1000;
 const SPEED = 3.2;                   // 玩家移动速度（格/秒）
 const PLAYER_R = 0.3;                // 玩家碰撞半径
+const STOP_TIME = 0.1;               // 松开输入后的同方向减速时间
+const DECELERATION = SPEED / STOP_TIME;
+const MOVE_FIXED_STEP = 1 / 60;      // 固定子步，最大位移约 0.053 格
+const MOVE_SOLVER_PASSES = 4;
+const MOVE_EPSILON = 1e-9;
 const CHOP_TIME = 3;                 // 切菜秒数
 const WASH_TIME = 4;                 // 洗一个盘子秒数
 const COOK_TIME = 12;                // 煮汤秒数
@@ -161,27 +166,126 @@ function isBlocked(L, cx, cz) {
   return L.cells[cz * L.w + cx] !== '.';
 }
 
-function collide(L, x, z, r) {
-  const cx = Math.floor(x);
-  const cz = Math.floor(z);
-  for (let j = cz - 1; j <= cz + 1; j++) {
-    for (let i = cx - 1; i <= cx + 1; i++) {
-      if (!isBlocked(L, i, j)) continue;
-      const nx = Math.max(i, Math.min(x, i + 1));
-      const nz = Math.max(j, Math.min(z, j + 1));
-      const dx = x - nx;
-      const dz = z - nz;
-      if (dx * dx + dz * dz < r * r) return true;
+function resolvePlayerCollision(L, p) {
+  for (let pass = 0; pass < MOVE_SOLVER_PASSES; pass++) {
+    let resolved = false;
+    const minX = Math.floor(p.x - PLAYER_R);
+    const maxX = Math.floor(p.x + PLAYER_R);
+    const minZ = Math.floor(p.z - PLAYER_R);
+    const maxZ = Math.floor(p.z + PLAYER_R);
+
+    for (let j = minZ; j <= maxZ; j++) {
+      for (let i = minX; i <= maxX; i++) {
+        if (!isBlocked(L, i, j)) continue;
+        const nearestX = Math.max(i, Math.min(p.x, i + 1));
+        const nearestZ = Math.max(j, Math.min(p.z, j + 1));
+        let nx = p.x - nearestX;
+        let nz = p.z - nearestZ;
+        const distanceSq = nx * nx + nz * nz;
+        if (distanceSq >= PLAYER_R * PLAYER_R - MOVE_EPSILON) continue;
+
+        let penetration;
+        const distance = Math.sqrt(distanceSq);
+        if (distance > MOVE_EPSILON) {
+          nx /= distance;
+          nz /= distance;
+          penetration = PLAYER_R - distance;
+        } else {
+          const exits = [
+            { d: p.x - (i - PLAYER_R), nx: -1, nz: 0 },
+            { d: i + 1 + PLAYER_R - p.x, nx: 1, nz: 0 },
+            { d: p.z - (j - PLAYER_R), nx: 0, nz: -1 },
+            { d: j + 1 + PLAYER_R - p.z, nx: 0, nz: 1 },
+          ];
+          exits.sort((a, b) => a.d - b.d);
+          ({ d: penetration, nx, nz } = exits[0]);
+        }
+
+        p.x += nx * penetration;
+        p.z += nz * penetration;
+        const intoSurface = p.vx * nx + p.vz * nz;
+        if (intoSurface < 0) {
+          p.vx -= intoSurface * nx;
+          p.vz -= intoSurface * nz;
+        }
+        resolved = true;
+      }
     }
+    if (!resolved) break;
   }
-  return false;
 }
 
-function tryMove(L, p, dx, dz) {
-  const nx = p.x + dx;
-  if (!collide(L, nx, p.z, PLAYER_R)) p.x = nx;
-  const nz = p.z + dz;
-  if (!collide(L, p.x, nz, PLAYER_R)) p.z = nz;
+function resolvePlayerBodies(p, others) {
+  for (let pass = 0; pass < MOVE_SOLVER_PASSES; pass++) {
+    let resolved = false;
+    for (let index = 0; index < others.length; index++) {
+      const other = others[index];
+      let nx = p.x - other.x;
+      let nz = p.z - other.z;
+      const distanceSq = nx * nx + nz * nz;
+      const minDistance = PLAYER_R * 2;
+      if (distanceSq >= minDistance * minDistance - MOVE_EPSILON) continue;
+
+      const distance = Math.sqrt(distanceSq);
+      if (distance > MOVE_EPSILON) {
+        nx /= distance;
+        nz /= distance;
+      } else {
+        nx = index % 2 === 0 ? 1 : -1;
+        nz = 0;
+      }
+      const penetration = minDistance - distance;
+      p.x += nx * penetration;
+      p.z += nz * penetration;
+      const intoPlayer = p.vx * nx + p.vz * nz;
+      if (intoPlayer < 0) {
+        p.vx -= intoPlayer * nx;
+        p.vz -= intoPlayer * nz;
+      }
+      resolved = true;
+    }
+    if (!resolved) break;
+  }
+}
+
+function stepPlayerMovement(L, p, input, dt, otherPlayers) {
+  const ix = Number(input && input.dx) || 0;
+  const iz = Number(input && input.dz) || 0;
+  const active = ix !== 0 || iz !== 0;
+  const steps = Math.max(1, Math.round(dt / MOVE_FIXED_STEP));
+  const stepDt = dt / steps;
+
+  for (let step = 0; step < steps; step++) {
+    let moveX;
+    let moveZ;
+    if (active) {
+      p.vx = ix * SPEED;
+      p.vz = iz * SPEED;
+      moveX = p.vx * stepDt;
+      moveZ = p.vz * stepDt;
+    } else {
+      const speed = Math.hypot(p.vx || 0, p.vz || 0);
+      if (speed <= MOVE_EPSILON) {
+        p.vx = 0;
+        p.vz = 0;
+        break;
+      }
+      const nextSpeed = Math.max(0, speed - DECELERATION * stepDt);
+      const averageSpeed = (speed + nextSpeed) * 0.5;
+      const dirX = p.vx / speed;
+      const dirZ = p.vz / speed;
+      moveX = dirX * averageSpeed * stepDt;
+      moveZ = dirZ * averageSpeed * stepDt;
+      p.vx = dirX * nextSpeed;
+      p.vz = dirZ * nextSpeed;
+    }
+
+    p.x += moveX;
+    p.z += moveZ;
+    resolvePlayerCollision(L, p);
+    resolvePlayerBodies(p, otherPlayers);
+    resolvePlayerCollision(L, p);
+  }
 }
 
 function targetStation(L, p) {
@@ -258,6 +362,9 @@ function setupGame(ctx) {
     p.x = sp.x + 0.5;
     p.z = sp.z + 0.5;
     p.input = { dx: 0, dz: 0 };
+    p.vx = 0;
+    p.vz = 0;
+    p.moveSeq = 0;
     p.face = { dx: 0, dz: 1 };
     p.carrying = null;
     p.working = false;
@@ -271,9 +378,10 @@ function setupGame(ctx) {
 function stepGame(ctx) {
   const s = ctx.state;
   const L = s.layout;
+  const playerIds = Object.keys(s.players);
 
   // --- 玩家：工作（切菜/洗碗）与移动 ---
-  for (const id in s.players) {
+  for (const id of playerIds) {
     const p = s.players[id];
     if (p.working) {
       const st = targetStation(L, p);
@@ -298,16 +406,21 @@ function stepGame(ctx) {
           didWork = true;
         }
       }
-      if (didWork) continue; // 工作时不能移动
+      if (didWork) {
+        p.vx = 0;
+        p.vz = 0;
+        continue; // 工作时不能移动，也不保留减速速度
+      }
     }
     const ix = p.input.dx;
     const iz = p.input.dz;
     if (ix !== 0 || iz !== 0) {
-      // 输入已在 action 中钳制到 |v|<=1，直接使用（摇杆支持变速）
-      tryMove(L, p, ix * SPEED * DT, iz * SPEED * DT);
       const flen = Math.hypot(ix, iz);
       if (flen > 0.2) p.face = { dx: ix / flen, dz: iz / flen };
     }
+    // 非零输入立即响应；零输入在 100ms 内沿原方向减速。
+    const otherPlayers = playerIds.filter((otherId) => otherId !== id).map((otherId) => s.players[otherId]);
+    stepPlayerMovement(L, p, p.input, DT, otherPlayers);
   }
 
   // --- 灶台：烹饪 / 烧糊 ---
@@ -505,6 +618,12 @@ export default defineRoom({
   onRestore(ctx) {
     // 房主刷新后从快照恢复：若对局仍在进行，重新挂上 tick 定时器
     if (ctx.host) ctx.state.hostId = ctx.host.id;
+    for (const id in ctx.state.players || {}) {
+      const p = ctx.state.players[id];
+      if (!Number.isFinite(p.vx)) p.vx = 0;
+      if (!Number.isFinite(p.vz)) p.vz = 0;
+      if (!Number.isSafeInteger(p.moveSeq)) p.moveSeq = 0;
+    }
     if (ctx.state.phase === 'playing' || ctx.state.phase === 'countdown') {
       armTick(ctx);
     }
@@ -520,6 +639,9 @@ export default defineRoom({
       x: 0,
       z: 0,
       input: { dx: 0, dz: 0 },
+      vx: 0,
+      vz: 0,
+      moveSeq: 0,
       face: { dx: 0, dz: 1 },
       carrying: null,
       working: false,
@@ -588,10 +710,12 @@ export default defineRoom({
         p.carrying = null;
         p.working = false;
         p.input = { dx: 0, dz: 0 };
+        p.vx = 0;
+        p.vz = 0;
       }
     },
 
-    // 移动意图：{ dx, dz }（持续状态，客户端在方向变化时发送）
+    // 移动意图：{ dx, dz, seq }（持续状态，客户端在方向变化时发送）
     move(ctx, { player, payload }) {
       const s = ctx.state;
       if (s.phase !== 'playing') return;
@@ -607,6 +731,15 @@ export default defineRoom({
       if (len > 1) {
         dx /= len;
         dz /= len;
+      }
+      const seq = Number(payload && payload.seq);
+      if (Number.isSafeInteger(seq) && seq >= 0) {
+        const currentSeq = Number.isSafeInteger(p.moveSeq) ? p.moveSeq : 0;
+        if (seq < currentSeq) return; // 忽略乱序到达的旧方向
+        p.moveSeq = seq;
+      } else {
+        // Compatibility with older clients and restored snapshots.
+        p.moveSeq = (Number.isSafeInteger(p.moveSeq) ? p.moveSeq : 0) + 1;
       }
       p.input = { dx, dz };
     },
