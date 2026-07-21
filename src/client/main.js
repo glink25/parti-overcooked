@@ -6,9 +6,10 @@
 import * as THREE from 'three';
 import demoStateJson from './demoState.json';
 import { createAudioEngine, orderWarningLevel, potWarningLevel } from './audio.js';
-import { PLAYER_R, reconcilePrediction, stepMovement } from './movement.js';
-import { cameraPoses, countdownIntroProgress, lerpCameraPose } from './visual/camera.js';
+import { PLAYER_R, reconcilePrediction, stepMovement, worldStation } from './movement.js';
+import { advanceDeadZoneCenter, cameraPoses, countdownIntroProgress, lerpCameraPose, nextCameraFollowMode } from './visual/camera.js';
 import { animateChefModel, kickChef, makeChefModel } from './visual/chef.js';
+import { conveyorArrowQuaternion, conveyorPathRects, conveyorSegment } from './visual/conveyor.js';
 import { createEnvironmentController } from './visual/environment.js';
 import { createEffectSystem } from './visual/effects.js';
 import { createMaterialSystem } from './visual/materials.js';
@@ -76,12 +77,12 @@ function missingItems(have, need) {
 }
 
 const MAP_META = [
-  { id: 'classic', name: '经典厨房', ico: '🍳', desc: '左右对称的新手厨房，动线宽敞，适合磨合配合。' },
-  { id: 'split',   name: '一线天',   ico: '🧱', desc: '台面高墙把厨房劈成两半，只有一条通道，记得隔空递菜！' },
-  { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '灶台集中在中央环岛，菜谱齐备，订单更密更考验分工。' },
-  { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '冰面惯性延长刹车距离，干活可立即停稳。' },
-  { id: 'space', name: '太空厨房', ico: '🚀', desc: '台面食材会被预告并随机漂移，及时拿起可阻止。' },
-  { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '上下城门交替开放，随时改变左右半场路线。' },
+  { id: 'classic', name: '经典厨房', ico: '🍳', desc: '紧凑双环厨房，用高台输入、输出线学习专职物流。' },
+  { id: 'split',   name: '一线天',   ico: '🏝️', desc: '本作唯一的移动浮岛地图，利用渡台与投掷完成跨岛协作。' },
+  { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '外环双输入、中央双输出，循环货运线每 20 秒换向。' },
+  { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '冰面控制、高台缆车与有护栏的可读冰裂谷共同制造挑战。' },
+  { id: 'space', name: '太空厨房', ico: '🚀', desc: '稳定的 U 形空间站，利用两条封闭气闸货运线组织左右物流。' },
+  { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '四组三格城门随机换阵，外围勤务环道始终保持连通。' },
 ];
 
 const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -531,13 +532,21 @@ let mapGroup = null;
 let builtGameSeq = -1;
 let builtLayout = null;
 let environmentProgress = 0;
-const stationNodes = new Map(); // key 'x,z' -> { group, dyn… }
+let cameraFollowMode = false;
+let cameraFollowCenter = null;
+let cameraLastUpdateAt = performance.now();
+const stationNodes = new Map(); // stable station id -> node
+const platformNodes = new Map();
+const conveyorNodes = new Map();
+const worldItemNodes = new Map();
+const worldItemPool = new Map();
 let activeTheme = themeFor('classic');
 function cabinetMaterialKind() { return activeTheme.id === 'split' || activeTheme.id === 'space' || activeTheme.id === 'snow' ? 'metal' : 'wood'; }
 function floorMaterialKind() { return activeTheme.id === 'classic' || activeTheme.id === 'castle' ? 'tile' : (activeTheme.id === 'space' ? 'metal' : 'noise'); }
 
 const STATION_STYLE = {
   counter: { color: 0x9b6a4d, label: '' },
+  conveyorPort: { color: 0x29b6a6, label: '运' },
   board: { color: 0xf0a83d, label: '切' },
   stove: { color: 0xe64a3c, label: '煮' },
   sink: { color: 0x35a9d6, label: '碗' },
@@ -588,6 +597,14 @@ function buildStation(st) {
     node.itemAnchor = new THREE.Group();
     node.itemAnchor.position.y = 0.95;
     g.add(node.itemAnchor);
+  } else if(st.type==='conveyorPort'){
+    const input=st.portMode==='input',accent=input?0x48d597:0x55b9ff;
+    const body=box(.96,.82,.96,0x435761,{kind:'metal',accent:0x263b44});body.position.y=.41;
+    const top=box(1.02,.1,1.02,0x22333b,{kind:'metal',accent});top.position.y=.86;
+    for(const offset of [-.3,-.1,.1,.3]){const roller=cyl(.045,.045,.78,0xa8bcc3,10);roller.rotation.z=Math.PI/2;roller.position.set(0,.94,offset);g.add(roller);}
+    const lamp=sph(.075,accent,10,6);lamp.position.set(.34,1.08,-.34);const glow=new THREE.PointLight(accent,1.1,2.2);glow.position.set(.34,1.12,-.34);
+    g.add(body,top,lamp,glow,makeStationBadge(input?'入':'出',accent));
+    node.itemAnchor=new THREE.Group();node.itemAnchor.position.y=1.04;g.add(node.itemAnchor);node.portLamp=lamp;node.portGlow=glow;
   } else if (st.type === 'board') {
     const body = box(0.96, 0.82, 0.96, activeTheme.cabinet, { kind: 'wood', accent: activeTheme.cabinetDark });
     body.position.y = 0.41;
@@ -743,6 +760,10 @@ function disposeMap() {
   });
   mapGroup = null;
   stationNodes.clear();
+  platformNodes.clear();
+  conveyorNodes.clear();
+  worldItemNodes.clear();
+  worldItemPool.clear();
   groundBuffNode = null;
   gateNodes.clear();
 }
@@ -752,6 +773,9 @@ function buildMap(layout) {
   environmentProgress = 0;
   mapGroup = new THREE.Group();
   builtLayout = layout;
+  cameraFollowMode = false;
+  cameraFollowCenter = null;
+  cameraLastUpdateAt = performance.now();
   activeTheme = themeFor(layout.mapId);
   document.body.dataset.mapTheme = activeTheme.id;
   scene.background = new THREE.Color(activeTheme.sky);
@@ -763,17 +787,17 @@ function buildMap(layout) {
   sun.intensity = activeTheme.sunIntensity;
   targetRing.material.color.setHex(activeTheme.target);
 
-  const { w, h, cells } = layout;
+  const { w, h } = layout.bounds;
   const floorGeometry = new THREE.BoxGeometry(0.97, 0.1, 0.97);
   const floorMaterials = [
     mat(activeTheme.floorA, { kind: floorMaterialKind(), accent: activeTheme.grout }),
     mat(activeTheme.floorB, { kind: floorMaterialKind(), accent: activeTheme.grout }),
   ];
-  const floorMeshes = floorMaterials.map((material) => new THREE.InstancedMesh(floorGeometry, material, Math.ceil(w * h / 2)));
+  const floorMeshes = floorMaterials.map((material) => new THREE.InstancedMesh(floorGeometry, material, w * h));
   const floorCounts = [0, 0];
   const dummy = new THREE.Object3D();
   let wallCount = 0;
-  for (const cell of cells) if (cell === '#') wallCount++;
+  for (const row of layout.terrain) for (const cell of row) if (cell === '#') wallCount++;
   const wallGeometry = new THREE.BoxGeometry(1, 1.15, 1);
   const wallMesh = new THREE.InstancedMesh(wallGeometry, mat(activeTheme.wall, { kind: activeTheme.id === 'split' || activeTheme.id === 'space' ? 'metal' : 'noise', accent: activeTheme.wallAlt }), wallCount);
   const trimGeometry = new THREE.BoxGeometry(1.03, 0.1, 1.03);
@@ -782,10 +806,12 @@ function buildMap(layout) {
   let wallIndex = 0;
   for (let z = 0; z < h; z++) {
     for (let x = 0; x < w; x++) {
-      const cell = cells[z * w + x];
+      const cell = layout.terrain[z][x];
       const parity = (x + z) & 1;
-      dummy.position.set(x + 0.5, -0.05, z + 0.5); dummy.updateMatrix();
-      floorMeshes[parity].setMatrixAt(floorCounts[parity]++, dummy.matrix);
+      if (cell === '.' || cell === 'i' || cell === '#') {
+        dummy.position.set(x + 0.5, -0.05, z + 0.5); dummy.updateMatrix();
+        floorMeshes[cell === 'i' ? 1 : parity].setMatrixAt(floorCounts[cell === 'i' ? 1 : parity]++, dummy.matrix);
+      }
       if (cell === '#') {
         dummy.position.set(x + 0.5, 0.575, z + 0.5); dummy.updateMatrix(); wallMesh.setMatrixAt(wallIndex, dummy.matrix);
         dummy.position.set(x + 0.5, 1.18, z + 0.5); dummy.updateMatrix(); trimMesh.setMatrixAt(wallIndex, dummy.matrix);
@@ -795,16 +821,69 @@ function buildMap(layout) {
   }
   floorMeshes.forEach((mesh, i) => { mesh.count = floorCounts[i]; mesh.receiveShadow = true; mapGroup.add(mesh); });
   mapGroup.add(wallMesh, trimMesh);
-  environment.buildEnvironment(mapGroup, layout, activeTheme);
+  let waterCount=0;for(const row of layout.terrain)for(const cell of row)if(cell==='~')waterCount++;
+  if(waterCount){const waterMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(.98,.05,.98),mat(0x49bcd3,{transparent:true,opacity:.78,emissive:0x167d9a,emissiveIntensity:.18}),waterCount);let wi=0;for(let z=0;z<h;z++)for(let x=0;x<w;x++)if(layout.terrain[z][x]==='~'){dummy.position.set(x+.5,-.16,z+.5);dummy.updateMatrix();waterMesh.setMatrixAt(wi++,dummy.matrix);}mapGroup.add(waterMesh);}
+  for(const marker of layout.hazardMarkers||[]){const warning=new THREE.Mesh(new THREE.RingGeometry(.22,.42,3),mat(0xffb300,{emissive:0xff6f00,emissiveIntensity:.9,side:THREE.DoubleSide}));warning.rotation.x=-Math.PI/2;warning.rotation.z=Math.PI;warning.position.set(marker.x,.015,marker.z);warning.userData.hazardMarker=true;mapGroup.add(warning);}
+  for(const hazard of layout.hazards||[])if(hazard.type==='iceCrevasse')for(const cell of hazard.cells||[]){
+    const pit=box(.94,.42,.94,0x020b13,{kind:'noise',accent:0x0d5470,emissive:0x041a2a,emissiveIntensity:.55});pit.position.set(cell.x+.5,-.2,cell.z+.5);mapGroup.add(pit);
+    const mouth=new THREE.Mesh(new THREE.CircleGeometry(.43,9),mat(0x01070d,{emissive:0x06263b,emissiveIntensity:.75,side:THREE.DoubleSide}));mouth.rotation.x=-Math.PI/2;mouth.rotation.z=.17;mouth.position.set(cell.x+.5,.012,cell.z+.5);mouth.scale.set(1,.82,1);mapGroup.add(mouth);
+    const iceEdge=new THREE.Mesh(new THREE.RingGeometry(.34,.47,9),mat(0x9deaff,{emissive:0x39b9dc,emissiveIntensity:.72,side:THREE.DoubleSide}));iceEdge.rotation.x=-Math.PI/2;iceEdge.rotation.z=.17;iceEdge.position.set(cell.x+.5,.016,cell.z+.5);iceEdge.scale.set(1,.82,1);mapGroup.add(iceEdge);
+    for(const edge of ['north','south','west','east']){const horizontal=edge==='north'||edge==='south',rim=box(horizontal ? .92 : .12,.12,horizontal ? .12 : .92,0xbdefff,{kind:'noise',accent:0x5cbdd6,emissive:0x277f99,emissiveIntensity:.32});rim.position.set(cell.x+.5+(edge==='west' ? -.46 : edge==='east' ? .46 : 0),.035,cell.z+.5+(edge==='north' ? -.46 : edge==='south' ? .46 : 0));rim.rotation.y=(edge==='west'||edge==='south') ? .08 : -.08;mapGroup.add(rim);}
+    for(const side of [-1,1]){const crack=box(.62,.018,.055,0x8eeeff,{emissive:0x42c9ef,emissiveIntensity:.9});crack.position.set(cell.x+.5+side*.78,.022,cell.z+.5);crack.rotation.y=side*.35;mapGroup.add(crack);const branch=box(.42,.018,.045,0x78dcf5,{emissive:0x38aaca,emissiveIntensity:.75});branch.position.set(cell.x+.5,.022,cell.z+.5+side*.72);branch.rotation.y=Math.PI/2+side*.28;mapGroup.add(branch);}
+    for(const edge of hazard.guardEdges||[]){const horizontal=edge==='north'||edge==='south',axis=edge==='north' ? -.52 : edge==='south' ? .52 : edge==='west' ? -.52 : .52;for(const offset of [-.36,.36]){const post=cyl(.045,.055,.7,0x546f78,8);post.position.set(cell.x+.5+(horizontal ? offset : axis),.35,cell.z+.5+(horizontal ? axis : offset));mapGroup.add(post);}const rope=box(horizontal ? .78 : .045,.045,horizontal ? .045 : .78,0xe84a4a,{kind:'noise',accent:0xffffff,emissive:0x7a1111,emissiveIntensity:.25});rope.position.set(cell.x+.5+(horizontal ? 0 : axis),.48,cell.z+.5+(horizontal ? axis : 0));mapGroup.add(rope);}
+    const mist=new THREE.Mesh(new THREE.CircleGeometry(.31,20),mat(0x60c7e5,{transparent:true,opacity:.1,emissive:0x2285a4,emissiveIntensity:.25,side:THREE.DoubleSide}));mist.rotation.x=-Math.PI/2;mist.position.set(cell.x+.5,-.035,cell.z+.5);mapGroup.add(mist);
+  }
+  environment.buildEnvironment(mapGroup, { ...layout, w, h }, activeTheme);
 
-  if (layout.mechanic && layout.mechanic.type === 'gate') {
-    for (const entry of layout.mechanic.gates) {
-      const gate = new THREE.Group(); gate.userData.id = entry.id;
-      const door = box(0.22, 1.3, 0.9, 0x8b6a45, { kind: 'wood', accent: 0xd6ae68 }); door.position.y = 0.65; gate.add(door);
-      for (const dz of [-0.36, 0.36]) { const bar = box(0.28, 1.42, 0.09, 0xe2b64e, { kind: 'metal' }); bar.position.set(0, 0.71, dz); gate.add(bar); }
-      const label = makeStationBadge(entry.id === 'top' ? '上门' : '下门', 0xffd36a); label.position.set(0, 1.5, 0); gate.add(label);
-      gate.position.set(entry.x + 0.5, entry.id === 'top' ? -1.7 : 0, entry.z + 0.5); gateNodes.set(entry.id, gate); mapGroup.add(gate);
+  // 移动平台独立成组，运行时只更新组偏移。
+  for (const platform of layout.platforms || []) {
+    const group = new THREE.Group();
+    group.position.set(platform.origin.x, 0, platform.origin.z);
+    const counts=[0,0],tilesByMaterial=[[],[]];for(const tile of platform.tiles||[]){const index=tile.kind==='i'?1:((tile.x+tile.z)&1);tilesByMaterial[index].push(tile);}
+    for(let materialIndex=0;materialIndex<2;materialIndex++){if(!tilesByMaterial[materialIndex].length)continue;const mesh=new THREE.InstancedMesh(floorGeometry,floorMaterials[materialIndex],tilesByMaterial[materialIndex].length),localDummy=new THREE.Object3D();for(const tile of tilesByMaterial[materialIndex]){localDummy.position.set(tile.x+.5,-.05,tile.z+.5);localDummy.updateMatrix();mesh.setMatrixAt(counts[materialIndex]++,localDummy.matrix);}mesh.receiveShadow=true;group.add(mesh);}
+    const directionHint = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 3), mat(0x55e8ff, { emissive: 0x168ead, emissiveIntensity: 0.7 }));
+    const maxTileX=Math.max(...platform.tiles.map((tile)=>tile.x))+1,maxTileZ=Math.max(...platform.tiles.map((tile)=>tile.z))+1;
+    directionHint.rotation.x = Math.PI / 2; directionHint.position.set(maxTileX/2, 0.24, maxTileZ/2); directionHint.visible = false;
+    group.userData.directionHint = directionHint; group.add(directionHint);
+    platformNodes.set(platform.id, group); mapGroup.add(group);
+  }
+
+  for (const mechanism of (layout.mechanisms || []).filter((entry) => entry.type === 'gate')) {
+    for (const entry of mechanism.config.groups || mechanism.config.gates || []) {
+      const root = new THREE.Group(); root.userData.id = entry.id;
+      const doorRoot = new THREE.Group(); root.add(doorRoot);
+      const cells = entry.cells || [{x:entry.x,z:entry.z}];
+      for (const cell of cells) {
+        const alongX=entry.orientation==='x';
+        const door = box(alongX ? .9 : .22, 1.3, alongX ? .22 : .9, 0x8b6a45, { kind: 'wood', accent: 0xd6ae68, emissive:0x000000, emissiveIntensity:0 });
+        door.position.set(cell.x+.5,.65,cell.z+.5);door.userData.gateDoor=true;doorRoot.add(door);
+        for(const offset of [-.32,.32]){const bar=box(alongX ? .08 : .28,1.42,alongX ? .28 : .08,0xe2b64e,{kind:'metal',emissive:0x000000,emissiveIntensity:0});bar.position.set(cell.x+.5+(alongX?offset:0),.71,cell.z+.5+(alongX?0:offset));bar.userData.gateDoor=true;doorRoot.add(bar);}
+      }
+      const middle=cells[Math.floor(cells.length/2)],label=makeStationBadge(entry.label||entry.id,0xffd36a);label.position.set(middle.x+.5,1.55,middle.z+.5);doorRoot.add(label);
+      const preview=new THREE.Mesh(new THREE.RingGeometry(.28,.43,16),mat(0xff5252,{transparent:true,opacity:.9,emissive:0xff1744,emissiveIntensity:.8}));
+      preview.rotation.x=-Math.PI/2;preview.position.set(middle.x+.5,.035,middle.z+.5);preview.visible=false;root.add(preview);
+      gateNodes.set(entry.id,{group:root,doorRoot,preview});mapGroup.add(root);
     }
+  }
+
+  for (const mechanism of (layout.mechanisms || []).filter((entry) => entry.type === 'conveyor')) {
+    const group = new THREE.Group(); const points = mechanism.config.path.points;
+    for (let i = 1; i < points.length; i++) {
+      const a=points[i-1],b=points[i],segment=conveyorSegment(a,b),body=box(.8,.72,segment.length,0x344852,{kind:'metal',accent:0x1d2d34}),rail=box(.76,.14,segment.length,0x657b84,{kind:'metal',accent:0xf6c344}),stripe=box(.08,.025,Math.max(.12,segment.length-.08),0xf6c344,{emissive:0x8f6200,emissiveIntensity:.28});
+      body.position.set(segment.centerX,.36,segment.centerZ);body.rotation.y=segment.angle;rail.position.set(segment.centerX,.79,segment.centerZ);rail.rotation.y=segment.angle;stripe.position.set(rail.position.x,.875,rail.position.z);stripe.rotation.y=segment.angle;stripe.userData.conveyorStripe=true;group.add(body,rail,stripe);
+      for(const side of [-1,1]){const guard=box(.055,.16,segment.length,0xc5d1d5,{kind:'metal',accent:0x5e7077});guard.position.set(segment.centerX+segment.dz*side*.38,.93,segment.centerZ-segment.dx*side*.38);guard.rotation.y=segment.angle;group.add(guard);}
+      const arrowCount=Math.max(1,Math.floor(segment.length/1.8));
+      for(let arrowIndex=0;arrowIndex<arrowCount;arrowIndex++){
+        const t=(arrowIndex+.5)/arrowCount;
+        const arrow=new THREE.Mesh(new THREE.ConeGeometry(.11,.34,3),mat(0xffd64a,{emissive:0xb56c00,emissiveIntensity:.45}));
+        arrow.userData.forwardQuaternion=conveyorArrowQuaternion(segment);arrow.userData.reverseQuaternion=conveyorArrowQuaternion(segment,true);arrow.quaternion.copy(arrow.userData.forwardQuaternion);
+        arrow.position.set(a.x+(b.x-a.x)*t,.93,a.z+(b.z-a.z)*t);arrow.userData.conveyorArrow=true;group.add(arrow);
+      }
+    }
+    for(let index=1;index<points.length-1;index++){const corner=box(.8,.14,.8,0x657b84,{kind:'metal',accent:0xf6c344});corner.position.set(points[index].x,.79,points[index].z);group.add(corner);}
+    for(const port of layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.conveyorId===mechanism.id)){const center={x:port.x+.5,z:port.z+.5},target=port.pathPoint;if(Math.hypot(center.x-target.x,center.z-target.z)>.75){const segment=conveyorSegment(center,target),tube=box(.34,.32,segment.length,0x283c45,{kind:'metal',accent:port.portMode==='input'?0x48d597:0x55b9ff});tube.position.set(segment.centerX,.88,segment.centerZ);tube.rotation.y=segment.angle;group.add(tube);}}
+    group.userData.supportId=mechanism.config.supportId||null;
+    conveyorNodes.set(mechanism.id,group);mapGroup.add(group);
   }
 
   if (layout.mapId === 'awards') {
@@ -818,10 +897,10 @@ function buildMap(layout) {
   }
 
   // 站台
-  for (const key in layout.stationAt) {
-    const st = layout.stationAt[key];
+  for (const st of layout.stations || []) {
     const node = buildStation(st);
-    stationNodes.set(key, node);
+    node.definition = st;
+    stationNodes.set(st.id, node);
     mapGroup.add(node.group);
   }
 
@@ -837,6 +916,8 @@ function buildMap(layout) {
   sun.shadow.camera.updateProjectionMatrix();
 
   scene.add(mapGroup);
+  const initialCamera=cameraPoses(layout,camera.aspect||1),initialPose=layout.mapId==='awards'?initialCamera.playing:initialCamera.overview;
+  camera.position.set(initialPose.x,initialPose.y,initialPose.z);updateCameraForState.look=new THREE.Vector3(initialCamera.target.x,initialCamera.target.y,initialCamera.target.z);camera.lookAt(updateCameraForState.look);
   fitCamera();
 }
 
@@ -863,9 +944,15 @@ function updateCameraForState(state) {
   const elapsedSinceSnapshot = Math.max(0, (performance.now() - introCountdownReceivedAt) / 1000);
   const predictedCountdown = Math.max(0, introCountdownValue - elapsedSinceSnapshot);
   const progress = isIntro ? countdownIntroProgress(predictedCountdown, 3) : 1;
-  const position = lerpCameraPose(poses.overview, poses.playing, progress);
-  camera.position.set(position.x, position.y, position.z);
-  camera.lookAt(poses.target.x, poses.target.y, poses.target.z);
+  const now=performance.now(),dt=Math.min(.05,Math.max(.001,(now-cameraLastUpdateAt)/1000));cameraLastUpdateAt=now;
+  const bounds=builtLayout.bounds;const pixelsPerTile=Math.min(window.innerWidth/bounds.w,window.innerHeight/bounds.h);const threshold=builtLayout.camera?.minPixelsPerTile||44;
+  if(!isIntro)cameraFollowMode=nextCameraFollowMode(cameraFollowMode,pixelsPerTile,threshold);
+  let position=lerpCameraPose(poses.overview,poses.playing,progress),target=poses.target;
+  if(!isIntro&&cameraFollowMode){
+    const me=state?.players?.[parti.playerId];if(me){const subject={x:THREE.MathUtils.clamp(selfPos?.x??me.x,1,bounds.w-1),z:THREE.MathUtils.clamp(selfPos?.z??me.z,1,bounds.h-1)},alpha=1-Math.exp(-dt*2);cameraFollowCenter=advanceDeadZoneCenter(cameraFollowCenter,subject,2.1,alpha);target={x:cameraFollowCenter.x,y:0,z:cameraFollowCenter.z};position={x:target.x,y:10.4,z:target.z+8.4};}
+  }else cameraFollowCenter=null;
+  const positionBlend=1-Math.exp(-dt*(cameraFollowMode?1.8:3.2)),lookBlend=1-Math.exp(-dt*(cameraFollowMode?1.35:2.8));camera.position.lerp(new THREE.Vector3(position.x,position.y,position.z),positionBlend);
+  if(!updateCameraForState.look)updateCameraForState.look=new THREE.Vector3(target.x,target.y,target.z);updateCameraForState.look.lerp(new THREE.Vector3(target.x,target.y,target.z),lookBlend);camera.lookAt(updateCameraForState.look);
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +960,8 @@ function updateCameraForState(state) {
 // ---------------------------------------------------------------------------
 function applyStations(state) {
   if (!state.stations) return;
+  if (builtLayout) builtLayout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
+  for(const node of stationNodes.values()){const position=worldStation(builtLayout,node.definition);node.group.position.set(position.x+.5,0,position.z+.5);}
   for (const key in state.stations) {
     const dyn = state.stations[key];
     const node = stationNodes.get(key);
@@ -896,6 +985,7 @@ function applyStations(state) {
           setBar(node.bar, null);
         }
       }
+      if(node.type==='conveyorPort'){const active=!!dyn.item,pulse=active?1.25+Math.sin(perfNow*6)*.35:.45;node.portGlow.intensity=pulse;node.portLamp.scale.setScalar(active?1.08+Math.sin(perfNow*6)*.08:1);}
     }
 
     // 灶台
@@ -1157,7 +1247,8 @@ function interpolatePlayers(dt) {
         node.render.z += dz * k;
       }
     }
-    node.group.position.set(node.render.x, 0, node.render.z);
+    const fallY=node.state?.fall?-1.15*(1-Math.max(0,node.state.fall.remaining)/.8):0;
+    node.group.position.set(node.render.x, fallY, node.render.z);
     const fallbackSpeed = Math.hypot(node.render.x - beforeX, node.render.z - beforeZ) / Math.max(dt, 0.001);
     const source = id === myId && selfPos ? selfPos : node.state;
     const hasVelocity = source && Number.isFinite(source.vx) && Number.isFinite(source.vz);
@@ -1193,6 +1284,18 @@ targetRing.rotation.x = -Math.PI / 2;
 targetRing.visible = false;
 scene.add(targetRing);
 
+const throwPreviewMaterial=new THREE.LineBasicMaterial({color:0xffcf45,transparent:true,opacity:.9,depthTest:false});
+const throwPreview=new THREE.Line(new THREE.BufferGeometry(),throwPreviewMaterial);throwPreview.visible=false;scene.add(throwPreview);
+const throwLanding=new THREE.Mesh(new THREE.RingGeometry(.28,.42,24),new THREE.MeshBasicMaterial({color:0xffcf45,transparent:true,opacity:.75,side:THREE.DoubleSide,depthTest:false}));throwLanding.rotation.x=-Math.PI/2;throwLanding.visible=false;scene.add(throwLanding);
+function conveyorLandingBlocked(x,z){if(!builtLayout)return false;for(const mechanism of (builtLayout.mechanisms||[]).filter((entry)=>entry.type==='conveyor')){let origin={x:0,z:0};if(mechanism.config.supportId){const def=builtLayout.platforms.find((entry)=>entry.id===mechanism.config.supportId),runtime=builtLayout._runtime?.platforms?.[mechanism.config.supportId];if(def)origin={x:def.origin.x+(runtime?.x||0),z:def.origin.z+(runtime?.z||0)};}if(conveyorPathRects(mechanism.config.path.points,.8,origin).some((rect)=>x>=rect.x&&x<=rect.x+rect.w&&z>=rect.z&&z<=rect.z+rect.h))return true;}return false;}
+function updateThrowPreview(){
+  const me=latestState?.players?.[parti.playerId];if(!activeInteract||!me?.carrying){throwPreview.visible=false;throwLanding.visible=false;return;}
+  const held=(performance.now()-activeInteract.startedAt)/1000;if(held<.3){throwPreview.visible=false;throwLanding.visible=false;return;}
+  const charge=Math.max(0,Math.min(1,(held-.3)/.9)),range=1.5+4*charge,face=me.face||{dx:0,dz:1},sx=selfPos?.x??me.x,sz=selfPos?.z??me.z,points=[];
+  for(let i=0;i<=18;i++){const t=i/18;points.push(new THREE.Vector3(sx+face.dx*(.45+range*t),.7+Math.sin(t*Math.PI)*1.8,sz+face.dz*(.45+range*t)));}
+  throwPreview.geometry.dispose();throwPreview.geometry=new THREE.BufferGeometry().setFromPoints(points);throwPreview.visible=true;const end=points[points.length-1],invalid=conveyorLandingBlocked(end.x,end.z),color=invalid?0xff5252:0xffcf45;throwPreviewMaterial.color.setHex(color);throwLanding.material.color.setHex(color);throwLanding.position.set(end.x,.06,end.z);throwLanding.visible=true;throwLanding.scale.setScalar(1+Math.sin(perfNow*7)*.08);if(IS_TOUCH)el.btnInteract.textContent=invalid?'不可投':'投 '+Math.round(range*10)/10;
+}
+
 function itemLabel(item) {
   if (!item) return '';
   if (item.k === 'raw') return ING[item.g].name + '（未切）';
@@ -1227,6 +1330,18 @@ function stationHint(st, dyn, me, state) {
       return { info: '被占用了' };
     }
     return { info: st.type === 'board' ? '砧板：放食材后按住切菜' : '台面：临时放东西' };
+  }
+  if(st.type==='conveyorPort'){
+    const item=dyn?.item;
+    if(st.portMode==='input'){
+      if(!c&&item)return{e:'取回'+itemLabel(item),info:'货物正在等待装载'};
+      if(c&&!item)return{e:'送入传送带｜'+itemLabel(c)};
+      if(c&&item)return{info:'输入台正在排队',warn:true};
+      return{info:'货运输入台：在这里放入货物'};
+    }
+    if(!c&&item)return{e:'领取'+itemLabel(item)};
+    if(c)return{info:'输出台只可取货，不能放入',warn:true};
+    return{info:'等待传送带送达货物'};
   }
   if (st.type === 'stove') {
     const pot = dyn;
@@ -1322,10 +1437,8 @@ function updateBubble() {
       const face = me.face || { dx: 0, dz: 1 };
       const px = selfPos ? selfPos.x : me.x;
       const pz = selfPos ? selfPos.z : me.z;
-      const tx = Math.floor(px + face.dx * 0.95);
-      const tz = Math.floor(pz + face.dz * 0.95);
-      const st = builtLayout.stationAt[tx + ',' + tz];
-      if (st) target = { st, key: tx + ',' + tz, me };
+      const tx = px + face.dx * 0.95, tz = pz + face.dz * 0.95;
+      for(const definition of builtLayout.stations||[]){const st=worldStation(builtLayout,definition);const d=Math.hypot(tx-(st.x+0.5),tz-(st.z+0.5));if(d<0.72&&(!target||d<target.d))target={st,key:st.id,me,d};}
     }
   }
 
@@ -1455,10 +1568,10 @@ function applyHud(state) {
   if ((state.fireOverdriveRemaining || 0) > 0) {
     el.eventChip.textContent = `🔥 全场火力 ×2 · ${Math.ceil(state.fireOverdriveRemaining)}s`;
     el.eventChip.classList.remove('hidden');
-  } else if (state.gate && state.gate.warning) {
-    const closing = state.gate.active === 'top' ? '上门' : '下门';
-    const opening = state.gate.active === 'top' ? '下门' : '上门';
-    el.eventChip.textContent = `⚠ ${closing}将关 · ${opening}将开 · ${Math.ceil(state.gate.remaining)}s`;
+  } else if (Object.values(state.mechanisms||{}).some((entry)=>entry.type==='gate'&&entry.warning)) {
+    const gate=Object.values(state.mechanisms).find((entry)=>entry.type==='gate');
+    const opening=gate.gates.filter((entry)=>entry.willOpen).map((entry)=>entry.label||entry.id).join('＋');
+    el.eventChip.textContent = `⚠ ${Math.ceil(gate.remaining)}s 后${opening||'门阵'}开放`;
     el.eventChip.classList.remove('hidden');
   } else el.eventChip.classList.add('hidden');
   if (me && me.carrying) {
@@ -1477,6 +1590,7 @@ function applyHud(state) {
 
 function applyWorldFeatures(state) {
   if (!mapGroup) return;
+  for(const [id,node] of platformNodes){const def=builtLayout.platforms.find((entry)=>entry.id===id);const runtime=state.platforms?.[id];node.position.set(def.origin.x+(runtime?.x||0),0,def.origin.z+(runtime?.z||0));const dx=(runtime?.x||0)-(runtime?.previousX||0),dz=(runtime?.z||0)-(runtime?.previousZ||0),hint=node.userData.directionHint;if(hint){hint.visible=Math.hypot(dx,dz)>.001;if(hint.visible)hint.rotation.y=Math.atan2(dx,dz);}}
   if (state.groundBuff) {
     if (!groundBuffNode || groundBuffNode.userData.type !== state.groundBuff.type) {
       if (groundBuffNode) mapGroup.remove(groundBuffNode);
@@ -1490,17 +1604,25 @@ function applyWorldFeatures(state) {
     groundBuffNode.rotation.y = perfNow * 1.8;
     groundBuffNode.visible = state.groundBuff.remaining > 5 || Math.floor(perfNow * 8) % 2 === 0;
   } else if (groundBuffNode) { mapGroup.remove(groundBuffNode); groundBuffNode = null; }
-  if (gateNodes.size && state.gate) {
-    for (const [id, gate] of gateNodes) {
-      const open = state.gate.active === id;
-      gate.position.y = THREE.MathUtils.lerp(gate.position.y, open ? -1.7 : 0, 0.25);
-      gate.children.forEach((child) => { if (child.material?.emissive) child.material.emissiveIntensity = state.gate.warning && open ? 0.8 + Math.sin(perfNow * 10) * 0.5 : 0; });
+  const gateState=Object.values(state.mechanisms||{}).find((entry)=>entry.type==='gate');
+  if (gateNodes.size && gateState) {
+    for (const [id, node] of gateNodes) {
+      const runtime=gateState.gates?.find((entry)=>entry.id===id),open=!!runtime?.open,pulse=.8+Math.sin(perfNow*10)*.35;
+      node.doorRoot.position.y=THREE.MathUtils.lerp(node.doorRoot.position.y,open?-1.7:0,.25);
+      node.doorRoot.traverse((child)=>{if(!child.userData.gateDoor||!child.material?.emissive)return;child.material.emissive.setHex(runtime?.willClose?0xff1744:0x000000);child.material.emissiveIntensity=runtime?.willClose?pulse:0;});
+      node.preview.visible=!!gateState.warning&&!!(runtime?.willOpen||runtime?.willClose);
+      if(node.preview.visible){const color=runtime.willOpen?0x36f58a:0xff5252;node.preview.material.color.setHex(color);node.preview.material.emissive.setHex(color);node.preview.material.opacity=.65+Math.sin(perfNow*10)*.25;}
     }
   }
-  for (const [key, node] of stationNodes) {
-    const warned = state.spaceEvent?.warning?.key === key;
-    if (node.itemAnchor) node.itemAnchor.scale.setScalar(warned ? 1.15 + Math.sin(perfNow * 10) * 0.12 : 1);
+  const seen=new Set();
+  for(const item of Object.values(state.worldItems||{})){
+    seen.add(item.id);let node=worldItemNodes.get(item.id);
+    if(!node){const poolKey=item.content?.k==='dish'?`dish:${recipeKey(item.content.items||[])}`:`${item.content?.k||'item'}:${item.content?.g||''}`,pool=worldItemPool.get(poolKey);node=pool?.pop()||new THREE.Group();node.userData.poolKey=poolKey;if(!node.children.length){const mesh=makeItemMesh(item.content);if(mesh)node.add(mesh);}node.visible=true;mapGroup.add(node);worldItemNodes.set(item.id,node);}
+    const flight=item.mode==='airborne'&&item.motion?Math.sin(Math.min(1,item.motion.elapsed/item.motion.duration)*Math.PI)*1.8:0;
+    node.position.set(item.x,(item.mode==='conveyor'?1.04:.25)+flight,item.z);node.visible=(item.expiresAt-(state.elapsed||0)>5)||Math.floor(perfNow*8)%2===0;
   }
+  for(const [id,node] of worldItemNodes)if(!seen.has(id)){mapGroup.remove(node);node.visible=false;const pool=worldItemPool.get(node.userData.poolKey)||[];pool.push(node);worldItemPool.set(node.userData.poolKey,pool);worldItemNodes.delete(id);}
+  for(const [id,node] of conveyorNodes){const runtime=state.mechanisms?.[id],support=node.userData.supportId,platform=support?state.platforms?.[support]:null,def=support?builtLayout.platforms.find((entry)=>entry.id===support):null;node.position.set(def?def.origin.x+(platform?.x||0):0,0,def?def.origin.z+(platform?.z||0):0);node.children.forEach((child,index)=>{if(child.userData.conveyorArrow)child.quaternion.copy(runtime?.direction===-1?child.userData.reverseQuaternion:child.userData.forwardQuaternion);const baseColor=child.userData.conveyorArrow ? 0xb56c00 : (child.userData.conveyorStripe ? 0x8f6200 : 0x000000),baseIntensity=child.userData.conveyorArrow ? .45 : (child.userData.conveyorStripe ? .28 : 0);child.material.emissive?.setHex(runtime?.warning?0xff8a00:baseColor);child.material.emissiveIntensity=runtime?.warning?0.8+Math.sin(perfNow*10+index)*0.3:baseIntensity;});}
 }
 
 // ---- 大厅 ----
@@ -1656,12 +1778,12 @@ let latestState = null;
 
 function facingTarget(state, player) {
   if (!state || !state.layout || !player) return null;
+  state.layout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
   const face = player.face || { dx: 0, dz: 1 };
-  const tx = Math.floor(player.x + face.dx * 0.95);
-  const tz = Math.floor(player.z + face.dz * 0.95);
-  const key = tx + ',' + tz;
-  const st = state.layout.stationAt && state.layout.stationAt[key];
-  return st ? { st, key, dyn: state.stations && state.stations[key] } : null;
+  const tx = player.x + face.dx * 0.95, tz = player.z + face.dz * 0.95;
+  let best=null;
+  for(const definition of state.layout.stations||[]){const st=worldStation(state.layout,definition);const d=Math.hypot(tx-(st.x+0.5),tz-(st.z+0.5));if(d<0.72&&(!best||d<best.d))best={st,key:st.id,dyn:state.stations?.[st.id],d};}
+  return best;
 }
 
 function applyAudioState(previous, state) {
@@ -1675,6 +1797,9 @@ function applyAudioState(previous, state) {
   }
 
   if (previous.phase !== 'playing' || state.phase !== 'playing') return;
+  const previousGate=Object.values(previous.mechanisms||{}).find((entry)=>entry.type==='gate');
+  const currentGate=Object.values(state.mechanisms||{}).find((entry)=>entry.type==='gate');
+  if(currentGate?.warning&&!previousGate?.warning)audio.playSfx('gateWarning');
   const id = parti.playerId;
   const beforeMe = previous.players && previous.players[id];
   const me = state.players && state.players[id];
@@ -1715,8 +1840,7 @@ parti.onState((state) => {
   const previousState = latestState;
   latestState = state;
   if (builtLayout && state.layout) {
-    builtLayout.dynamicBlocked = state.layout.dynamicBlocked || {};
-    builtLayout.movementProfile = state.layout.movementProfile || null;
+    builtLayout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
   }
   if (state.phase === 'countdown') {
     introCountdownValue = state.countdown || 0;
@@ -1771,9 +1895,12 @@ parti.onEvent('pot:burnt', () => {
 parti.onEvent('plate:dirty', () => { toast('脏盘子回到水槽了'); audio.playSfx('dirty'); });
 parti.onEvent('buff:spawn', () => { toast('✨ 地图上出现了稀有 Buff！'); audio.playSfx('orderNew'); });
 parti.onEvent('buff:picked', (p) => { const info = BUFF_INFO[p.type] || ['✨', p.type]; toast(`${p.by} 获得 ${info[0]}${info[1]}`, p.type === 'fire_overdrive' ? 'bad' : 'good'); audio.playSfx('pickup'); });
-parti.onEvent('space:warning', () => { toast('🛸 一份台面食材即将漂移！'); audio.playSfx('orderNew'); });
-parti.onEvent('space:teleport', () => { toast('🛸 食材已漂移到另一处台面'); audio.playSfx('place'); });
-parti.onEvent('gate:switch', (p) => { toast(`🏰 ${p.open === 'top' ? '上门开 · 下门关' : '下门开 · 上门关'}`); audio.playSfx('workDone'); });
+parti.onEvent('gate:switch', (p) => { toast(`🏰 ${p.label || (p.open||[]).join('＋')}开放`); audio.playSfx('workDone'); });
+parti.onEvent('conveyor:reverse', () => { toast('⚙️ 传送带换向！'); audio.playSfx('workDone'); });
+parti.onEvent('item:thrown', () => { audio.playSfx('place'); });
+parti.onEvent('item:caught', (p) => { toast(`🙌 ${p.by} 接住了！`, 'good'); audio.playSfx('pickup'); });
+parti.onEvent('item:lost', () => { toast('💦 物品掉进水里了', 'bad'); audio.playSfx('trash'); });
+parti.onEvent('player:fall', (p) => { toast(`💦 ${p.name} 落水了`, 'bad'); audio.playSfx('trash'); });
 parti.onEvent('game:over', () => { audio.playSfx('over'); });
 parti.onEvent('player:joined', (p) => { toast(`${p.name} 加入了厨房`); audio.playSfx('join'); });
 parti.onEvent('__error', (p) => { parti.log('room error', p); });
@@ -1784,6 +1911,9 @@ parti.onEvent('__error', (p) => { parti.log('room error', p); });
 const keysDown = new Set();
 let lastSentMove = { dx: 0, dz: 0, seq: 0 };
 let workHeld = false;
+let workSeq = 0;
+let interactSeq = 0;
+let activeInteract = null;
 
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const INTERACT_KEYS = new Set(['KeyE', 'Space', 'KeyJ']);
@@ -1804,8 +1934,15 @@ function keyboardVector() {
 function setWork(on) {
   if (workHeld === on) return;
   workHeld = on;
-  parti.action('work', { on });
+  parti.action('work', { active: on, seq: ++workSeq });
   el.btnWork.classList.toggle('on', on);
+}
+
+function startInteract(source) {
+  if(activeInteract)return;activeInteract={source,seq:++interactSeq,startedAt:performance.now()};parti.action('interact',{phase:'start',seq:activeInteract.seq});el.btnInteract.classList.add('on');
+}
+function finishInteract(source,cancel=false) {
+  if(!activeInteract||activeInteract.source!==source)return;parti.action('interact',{phase:cancel?'cancel':'release',seq:activeInteract.seq});activeInteract=null;el.btnInteract.classList.remove('on');throwPreview.visible=false;throwLanding.visible=false;touchActionKey='';
 }
 
 function sendMove(v) {
@@ -1822,18 +1959,21 @@ window.addEventListener('keydown', (e) => {
   }
   if (MOVE_KEYS.has(e.code) || INTERACT_KEYS.has(e.code) || WORK_KEYS.has(e.code)) e.preventDefault();
   if (MOVE_KEYS.has(e.code)) keysDown.add(e.code);
-  else if (INTERACT_KEYS.has(e.code)) parti.action('interact');
-  else if (WORK_KEYS.has(e.code)) setWork(true);
+  else if (INTERACT_KEYS.has(e.code)) startInteract(`key:${e.code}`);
+  else if (WORK_KEYS.has(e.code)) { keysDown.add(e.code); setWork(true); }
 });
 window.addEventListener('keyup', (e) => {
   if (MOVE_KEYS.has(e.code)) keysDown.delete(e.code);
+  else if (INTERACT_KEYS.has(e.code)) finishInteract(`key:${e.code}`);
   else if (WORK_KEYS.has(e.code)) {
+    keysDown.delete(e.code);
     // 还有其他工作键按着则保持
     for (const k of WORK_KEYS) if (k !== e.code && keysDown.has(k)) return;
     setWork(false);
   }
 });
 function releaseAllInput() {
+  if(activeInteract)finishInteract(activeInteract.source,true);
   keysDown.clear();
   setWork(false);
   sendMove({ dx: 0, dz: 0 });
@@ -1901,8 +2041,12 @@ el.touchZone.addEventListener('lostpointercapture', joyRelease);
 
 el.btnInteract.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  parti.action('interact');
+  el.btnInteract.setPointerCapture(e.pointerId);
+  startInteract(`pointer:${e.pointerId}`);
 });
+el.btnInteract.addEventListener('pointerup',(e)=>finishInteract(`pointer:${e.pointerId}`));
+el.btnInteract.addEventListener('pointercancel',(e)=>finishInteract(`pointer:${e.pointerId}`,true));
+el.btnInteract.addEventListener('lostpointercapture',(e)=>finishInteract(`pointer:${e.pointerId}`,true));
 el.btnWork.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   el.btnWork.setPointerCapture(e.pointerId);
@@ -1984,6 +2128,7 @@ function frame(ts) {
   stepPrediction(dt);
   interpolatePlayers(dt);
   updateBubble();
+  updateThrowPreview();
   updateWorkSound(ts);
   updateWarningSounds(ts);
   effects.update(dt);
@@ -2001,6 +2146,7 @@ function frame(ts) {
   // 灶台汤水翻滚等时间动画在 applyStations 中用 perfNow 驱动
   if (latestState && (latestState.phase === 'playing' || latestState.phase === 'countdown') && stationNodes.size) {
     applyStations(latestState);
+    applyWorldFeatures(latestState);
   }
 
   updateCameraForState(latestState);

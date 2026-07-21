@@ -134,7 +134,7 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   }
 
   function buildFactory(parent, layout) {
-    const { w, h, cells } = layout;
+    const { w, h } = layout;
     const slab = box(w + 4.2, 0.16, h + 4, 0xb9eee2, { kind: 'tile', accent: 0x79cfc7 });
     slab.position.set(w / 2, -0.2, h / 2); slab.castShadow = false; slab.receiveShadow = true; parent.add(slab);
     const colors = [0xff7f73, 0xffd34f, 0x52cdb8, 0x8ea9f3];
@@ -153,13 +153,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
       const rim = cyl(0.3, 0.3, 0.16, 0xffefb0, 8); rim.position.set(x, 1.62, -1.05); parent.add(rim);
       for (let i = 0; i < (qualityTier === 'low' ? 2 : 3); i++) {
         const puff = sph(0.2 + i * 0.07, 0xffffff, 7, 5); puff.position.set(x + i * 0.16, 1.95 + i * 0.27, -1.05); parent.add(puff);
-      }
-    }
-    for (let z = 0; z < h; z++) {
-      for (let x = 0; x < w; x++) {
-        if (cells[z * w + x] !== 'C' || Math.abs(x - Math.floor(w / 2)) > 1) continue;
-        const belt = box(0.7, 0.025, 0.58, z % 2 ? 0xffd653 : 0xff9b75);
-        belt.position.set(x + 0.5, 0.93, z + 0.5); parent.add(belt);
       }
     }
     for (let x = 1; x < w; x += 2) {

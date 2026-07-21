@@ -1,32 +1,139 @@
 {
   "phase": "playing",
   "mode": "party",
-  "roundIndex": 2,
-  "difficultyLevel": 2,
-  "sessionScore": 46,
-  "roundScore": 46,
-  "roundServed": 2,
-  "roundExpired": 0,
-  "rage": 0,
-  "rageMax": 100,
+  "roundIndex": 1,
+  "difficultyLevel": 1,
+  "mapQueue": [
+    "space",
+    "castle",
+    "snow",
+    "classic",
+    "split"
+  ],
+  "nextMapId": null,
+  "roundResultTime": 0,
   "gameSeq": 1,
-  "mapId": "classic",
+  "mapId": "ring",
   "hostId": "host",
   "countdown": 0,
   "timeLeft": 127,
   "score": 46,
+  "sessionScore": 0,
+  "roundScore": 0,
   "served": 2,
+  "roundServed": 0,
   "expired": 0,
+  "roundExpired": 0,
+  "burns": 0,
+  "roundBurns": 0,
+  "roundHistory": [],
+  "roundComment": null,
+  "finalComment": null,
+  "roundTitles": {},
+  "finalTitles": {},
+  "rage": 0,
+  "rageMax": 100,
+  "standings": [],
+  "playerRecords": {
+    "host": {
+      "name": "房主",
+      "color": "#e74c3c",
+      "contributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "joinOrder": 1,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundSpawnSlot": 1,
+      "roundSpawnGameSeq": 1,
+      "roundSpawnMapId": "ring"
+    },
+    "p2": {
+      "name": "小明",
+      "color": "#3498db",
+      "contributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "joinOrder": 2,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundSpawnSlot": 2,
+      "roundSpawnGameSeq": 1,
+      "roundSpawnMapId": "ring"
+    },
+    "p3": {
+      "name": "阿花",
+      "color": "#f1c40f",
+      "contributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "joinOrder": 3,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundSpawnSlot": 3,
+      "roundSpawnGameSeq": 1,
+      "roundSpawnMapId": "ring"
+    }
+  },
+  "joinSeq": 3,
   "players": {
     "host": {
       "name": "房主",
       "color": "#e74c3c",
-      "x": 10.5,
-      "z": 4.5,
+      "x": 4.5,
+      "z": 9.5,
       "input": {
         "dx": 0,
         "dz": 0
       },
+      "vx": 0,
+      "vz": 0,
+      "moveSeq": 0,
       "face": {
         "dx": 0,
         "dz": 1
@@ -36,17 +143,69 @@
         "g": "tomato",
         "progress": 0
       },
-      "working": false
+      "working": false,
+      "supportId": null,
+      "roundSpawnSlot": 1,
+      "charge": null,
+      "fall": null,
+      "respawnGrace": 0,
+      "interactSeq": 0,
+      "workSeq": 0,
+      "activeBuff": null,
+      "contributionScore": 0,
+      "roundContributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "roundServed": 0,
+      "roundPublicEvents": 0,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundStats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "joinOrder": 1
     },
     "p2": {
       "name": "小明",
       "color": "#3498db",
-      "x": 7.5,
-      "z": 2.5,
+      "x": 9.5,
+      "z": 8.5,
       "input": {
         "dx": 0,
         "dz": 0
       },
+      "vx": 0,
+      "vz": 0,
+      "moveSeq": 0,
       "face": {
         "dx": 0,
         "dz": 1
@@ -55,407 +214,520 @@
         "k": "plate",
         "items": []
       },
-      "working": false
+      "working": false,
+      "supportId": null,
+      "roundSpawnSlot": 2,
+      "charge": null,
+      "fall": null,
+      "respawnGrace": 0,
+      "interactSeq": 0,
+      "workSeq": 0,
+      "activeBuff": null,
+      "contributionScore": 0,
+      "roundContributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "roundServed": 0,
+      "roundPublicEvents": 0,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundStats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "joinOrder": 2
     },
     "p3": {
       "name": "阿花",
       "color": "#f1c40f",
-      "x": 3.5,
-      "z": 4.5,
+      "x": 16.5,
+      "z": 9.5,
       "input": {
         "dx": 0,
         "dz": 0
       },
+      "vx": 0,
+      "vz": 0,
+      "moveSeq": 0,
       "face": {
         "dx": 0,
         "dz": 1
       },
       "carrying": null,
-      "working": true
+      "working": true,
+      "supportId": null,
+      "roundSpawnSlot": 3,
+      "charge": null,
+      "fall": null,
+      "respawnGrace": 0,
+      "interactSeq": 0,
+      "workSeq": 0,
+      "activeBuff": null,
+      "contributionScore": 0,
+      "roundContributionScore": 0,
+      "servedCount": 0,
+      "publicEvents": 0,
+      "roundServed": 0,
+      "roundPublicEvents": 0,
+      "stats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "roundStats": {
+        "chops": 0,
+        "washes": 0,
+        "assembles": 0,
+        "potAdds": 0,
+        "potPickups": 0,
+        "deliveries": 0,
+        "fastServes": 0,
+        "clutchServes": 0,
+        "burnClears": 0,
+        "discards": 0,
+        "throws": 0,
+        "catches": 0,
+        "groundPickups": 0,
+        "falls": 0,
+        "conveyorTransfers": 0
+      },
+      "joinOrder": 3
     }
   },
   "layout": {
-    "mapId": "classic",
-    "name": "经典厨房",
-    "w": 15,
-    "h": 9,
-    "cells": [
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "G",
-      ".",
-      "G",
-      ".",
-      ".",
-      ".",
-      "C",
-      ".",
-      "C",
-      ".",
-      ".",
-      "G",
-      ".",
-      "#",
-      "#",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      "#",
-      "#",
-      "C",
-      ".",
-      "C",
-      ".",
-      ".",
-      ".",
-      "P",
-      ".",
-      ".",
-      ".",
-      "C",
-      ".",
-      "C",
-      "#",
-      "#",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      "C",
-      "C",
-      "C",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      "#",
-      "#",
-      "B",
-      ".",
-      "B",
-      ".",
-      "X",
-      ".",
-      "K",
-      ".",
-      ".",
-      "S",
-      ".",
-      "S",
-      ".",
-      "#",
-      "#",
-      "G",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      "G",
-      "#",
-      "#",
-      "C",
-      ".",
-      "C",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      ".",
-      "C",
-      ".",
-      "C",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "W",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#",
-      "#"
+    "mapId": "ring",
+    "name": "环岛餐吧",
+    "bounds": {
+      "w": 21,
+      "h": 17
+    },
+    "terrain": [
+      "~~~~~~~~~~#~~~~~~~~~~",
+      "~~~~~~####.####~~~~~~",
+      "~~~~##.........##~~~~",
+      "~~~#.............#~~~",
+      "~~#.......~.......#~~",
+      "~#.....##~~###.....#~",
+      "~#....##.....##....#~",
+      "~#....~~.....##....#~",
+      "#....~~~.....~~~....#",
+      "~#....##.....~~....#~",
+      "~#....##.....##....#~",
+      "~#.....####~~#.....#~",
+      "~~#.......#.......#~~",
+      "~~~#.............#~~~",
+      "~~~~##.........##~~~~",
+      "~~~~~~#########~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~"
+    ],
+    "platforms": [],
+    "stations": [
+      {
+        "id": "tomato",
+        "type": "crate",
+        "x": 2,
+        "z": 6,
+        "crate": "tomato"
+      },
+      {
+        "id": "onion",
+        "type": "crate",
+        "x": 4,
+        "z": 3,
+        "crate": "onion"
+      },
+      {
+        "id": "mushroom",
+        "type": "crate",
+        "x": 8,
+        "z": 2,
+        "crate": "mushroom"
+      },
+      {
+        "id": "lettuce",
+        "type": "crate",
+        "x": 15,
+        "z": 3,
+        "crate": "lettuce"
+      },
+      {
+        "id": "cucumber",
+        "type": "crate",
+        "x": 18,
+        "z": 6,
+        "crate": "cucumber"
+      },
+      {
+        "id": "carrot",
+        "type": "crate",
+        "x": 17,
+        "z": 11,
+        "crate": "carrot"
+      },
+      {
+        "id": "potato",
+        "type": "crate",
+        "x": 10,
+        "z": 14,
+        "crate": "potato"
+      },
+      {
+        "id": "board_n",
+        "type": "board",
+        "x": 6,
+        "z": 3
+      },
+      {
+        "id": "board_s",
+        "type": "board",
+        "x": 15,
+        "z": 13
+      },
+      {
+        "id": "sink",
+        "type": "sink",
+        "x": 6,
+        "z": 13
+      },
+      {
+        "id": "ring_in_w",
+        "type": "conveyorPort",
+        "x": 4,
+        "z": 8,
+        "conveyorId": "ring_belt",
+        "portMode": "input",
+        "pathPoint": {
+          "x": 8.5,
+          "z": 8.5
+        }
+      },
+      {
+        "id": "ring_in_e",
+        "type": "conveyorPort",
+        "x": 16,
+        "z": 8,
+        "conveyorId": "ring_belt",
+        "portMode": "input",
+        "pathPoint": {
+          "x": 12.5,
+          "z": 8.5
+        }
+      },
+      {
+        "id": "ring_out_n",
+        "type": "conveyorPort",
+        "x": 10,
+        "z": 6,
+        "conveyorId": "ring_belt",
+        "portMode": "output",
+        "pathPoint": {
+          "x": 10.5,
+          "z": 6.5
+        }
+      },
+      {
+        "id": "ring_out_s",
+        "type": "conveyorPort",
+        "x": 10,
+        "z": 10,
+        "conveyorId": "ring_belt",
+        "portMode": "output",
+        "pathPoint": {
+          "x": 10.5,
+          "z": 10.5
+        }
+      },
+      {
+        "id": "stove_a",
+        "type": "stove",
+        "x": 9,
+        "z": 7
+      },
+      {
+        "id": "trash",
+        "type": "trash",
+        "x": 10,
+        "z": 7
+      },
+      {
+        "id": "stove_b",
+        "type": "stove",
+        "x": 11,
+        "z": 7
+      },
+      {
+        "id": "plates",
+        "type": "plates",
+        "x": 9,
+        "z": 9
+      },
+      {
+        "id": "stove_c",
+        "type": "stove",
+        "x": 10,
+        "z": 9
+      },
+      {
+        "id": "window",
+        "type": "window",
+        "x": 11,
+        "z": 9
+      }
+    ],
+    "mechanisms": [
+      {
+        "id": "ring_belt",
+        "type": "conveyor",
+        "config": {
+          "path": {
+            "points": [
+              {
+                "x": 12.5,
+                "z": 10.5
+              },
+              {
+                "x": 8.5,
+                "z": 10.5
+              },
+              {
+                "x": 8.5,
+                "z": 6.5
+              },
+              {
+                "x": 12.5,
+                "z": 6.5
+              },
+              {
+                "x": 12.5,
+                "z": 10.5
+              }
+            ],
+            "speed": 1,
+            "loop": true
+          },
+          "reverseEvery": 20,
+          "warning": 3
+        }
+      }
+    ],
+    "checkpoints": [
+      {
+        "id": "outer",
+        "x": 4.5,
+        "z": 9.5
+      },
+      {
+        "id": "center",
+        "x": 10.5,
+        "z": 8.5
+      }
     ],
     "spawns": [
       {
-        "x": 3,
-        "z": 2
+        "slot": 1,
+        "x": 4.5,
+        "z": 9.5
       },
       {
-        "x": 11,
-        "z": 2
+        "slot": 2,
+        "x": 9.5,
+        "z": 8.5
       },
       {
-        "x": 4,
-        "z": 6
+        "slot": 3,
+        "x": 16.5,
+        "z": 9.5
       },
       {
-        "x": 10,
-        "z": 6
+        "slot": 4,
+        "x": 11.5,
+        "z": 8.5
       }
     ],
-    "stationAt": {
-      "1,1": {
-        "x": 1,
-        "z": 1,
-        "type": "crate",
-        "crate": "tomato"
+    "hazardMarkers": [
+      {
+        "x": 10.5,
+        "z": 4.5
       },
-      "3,1": {
-        "x": 3,
-        "z": 1,
-        "type": "crate",
-        "crate": "carrot"
+      {
+        "x": 11.5,
+        "z": 11.5
       },
-      "7,1": {
-        "x": 7,
-        "z": 1,
-        "type": "counter"
+      {
+        "x": 6.5,
+        "z": 7.5
       },
-      "9,1": {
-        "x": 9,
-        "z": 1,
-        "type": "counter"
-      },
-      "12,1": {
-        "x": 12,
-        "z": 1,
-        "type": "crate",
-        "crate": "onion"
-      },
-      "1,3": {
-        "x": 1,
-        "z": 3,
-        "type": "counter"
-      },
-      "3,3": {
-        "x": 3,
-        "z": 3,
-        "type": "counter"
-      },
-      "7,3": {
-        "x": 7,
-        "z": 3,
-        "type": "plates"
-      },
-      "11,3": {
-        "x": 11,
-        "z": 3,
-        "type": "counter"
-      },
-      "13,3": {
-        "x": 13,
-        "z": 3,
-        "type": "counter"
-      },
-      "6,4": {
-        "x": 6,
-        "z": 4,
-        "type": "counter"
-      },
-      "7,4": {
-        "x": 7,
-        "z": 4,
-        "type": "counter"
-      },
-      "8,4": {
-        "x": 8,
-        "z": 4,
-        "type": "counter"
-      },
-      "1,5": {
-        "x": 1,
-        "z": 5,
-        "type": "board"
-      },
-      "3,5": {
-        "x": 3,
-        "z": 5,
-        "type": "board"
-      },
-      "5,5": {
-        "x": 5,
-        "z": 5,
-        "type": "trash"
-      },
-      "7,5": {
-        "x": 7,
-        "z": 5,
-        "type": "sink"
-      },
-      "10,5": {
-        "x": 10,
-        "z": 5,
-        "type": "stove"
-      },
-      "12,5": {
-        "x": 12,
-        "z": 5,
-        "type": "stove"
-      },
-      "1,6": {
-        "x": 1,
-        "z": 6,
-        "type": "crate",
-        "crate": "lettuce"
-      },
-      "13,6": {
-        "x": 13,
-        "z": 6,
-        "type": "crate",
-        "crate": "cucumber"
-      },
-      "1,7": {
-        "x": 1,
-        "z": 7,
-        "type": "counter"
-      },
-      "3,7": {
-        "x": 3,
-        "z": 7,
-        "type": "counter"
-      },
-      "11,7": {
-        "x": 11,
-        "z": 7,
-        "type": "counter"
-      },
-      "13,7": {
-        "x": 13,
-        "z": 7,
-        "type": "counter"
-      },
-      "7,8": {
-        "x": 7,
-        "z": 8,
-        "type": "window"
+      {
+        "x": 14.5,
+        "z": 8.5
       }
+    ],
+    "hazards": [],
+    "camera": {
+      "minPixelsPerTile": 44
     }
   },
   "stations": {
-    "7,1": {
-      "item": null
-    },
-    "9,1": {
-      "item": null
-    },
-    "1,3": {
-      "item": null
-    },
-    "3,3": {
-      "item": {
-        "k": "raw",
-        "g": "lettuce",
-        "progress": 0
-      }
-    },
-    "11,3": {
-      "item": {
-        "k": "dish",
-        "items": [
-          { "ingredient": "lettuce", "prep": "chopped" },
-          { "ingredient": "tomato", "prep": "whole" }
-        ]
-      }
-    },
-    "13,3": {
-      "item": null
-    },
-    "6,4": {
-      "item": null
-    },
-    "7,4": {
-      "item": null
-    },
-    "8,4": {
-      "item": null
-    },
-    "1,5": {
-      "item": null
-    },
-    "3,5": {
+    "tomato": {},
+    "onion": {},
+    "mushroom": {},
+    "lettuce": {},
+    "cucumber": {},
+    "carrot": {},
+    "potato": {},
+    "board_n": {
       "item": {
         "k": "raw",
         "g": "carrot",
         "progress": 1.6
       }
     },
-    "10,5": {
+    "board_s": {
+      "item": null
+    },
+    "sink": {},
+    "ring_in_w": {
+      "item": null,
+      "lastOwnerId": null
+    },
+    "ring_in_e": {
+      "item": null
+    },
+    "ring_out_n": {
+      "item": {
+        "k": "dish",
+        "items": [
+          {
+            "ingredient": "lettuce",
+            "prep": "chopped"
+          },
+          {
+            "ingredient": "tomato",
+            "prep": "whole"
+          }
+        ]
+      }
+    },
+    "ring_out_s": {
+      "item": null
+    },
+    "stove_a": {
       "contents": [
-        { "ingredient": "tomato", "prep": "chopped" },
-        { "ingredient": "tomato", "prep": "chopped" },
-        { "ingredient": "tomato", "prep": "chopped" }
+        {
+          "ingredient": "tomato",
+          "prep": "chopped"
+        },
+        {
+          "ingredient": "tomato",
+          "prep": "chopped"
+        },
+        {
+          "ingredient": "tomato",
+          "prep": "chopped"
+        }
       ],
+      "credits": [],
       "phase": "cooking",
-      "t": 5
+      "t": 5.1,
+      "masterChef": false
     },
-    "12,5": {
+    "trash": {},
+    "stove_b": {
       "contents": [
-        { "ingredient": "carrot", "prep": "chopped" },
-        { "ingredient": "carrot", "prep": "chopped" }
+        {
+          "ingredient": "carrot",
+          "prep": "chopped"
+        }
       ],
+      "credits": [],
       "phase": "idle",
-      "t": 0
+      "t": 0,
+      "masterChef": false
     },
-    "1,7": {
-      "item": null
+    "plates": {},
+    "stove_c": {
+      "contents": [],
+      "credits": [],
+      "phase": "idle",
+      "t": 0,
+      "masterChef": false
     },
-    "3,7": {
-      "item": null
-    },
-    "11,7": {
-      "item": null
-    },
-    "13,7": {
-      "item": null
+    "window": {}
+  },
+  "platforms": {},
+  "mechanisms": {
+    "ring_belt": {
+      "type": "conveyor",
+      "direction": 1,
+      "reverseIn": 19.799999999999997,
+      "warning": false
     }
   },
+  "worldItems": {
+    "wi1": {
+      "id": "wi1",
+      "content": {
+        "k": "raw",
+        "g": "carrot",
+        "progress": 0
+      },
+      "mode": "conveyor",
+      "x": 8.5,
+      "z": 8.399999999999999,
+      "supportId": null,
+      "createdAt": 3.2000000000000015,
+      "expiresAt": 23.200000000000003,
+      "conveyorId": "ring_belt",
+      "pathDistance": 6.100000000000001,
+      "lastOwnerId": "host"
+    }
+  },
+  "worldItemSeq": 1,
+  "elapsed": 3.2000000000000015,
   "orders": [
     {
       "id": "o1",
-      "recipeId": "tomato_soup",
-      "key": "tomato:chopped+tomato:chopped+tomato:chopped",
-      "items": [{ "ingredient": "tomato", "prep": "chopped" }, { "ingredient": "tomato", "prep": "chopped" }, { "ingredient": "tomato", "prep": "chopped" }],
+      "key": "tomato+tomato+tomato",
       "name": "番茄浓汤",
       "points": 20,
       "t": 62,
@@ -463,9 +735,7 @@
     },
     {
       "id": "o2",
-      "recipeId": "garden_salad",
-      "key": "lettuce:chopped+tomato:whole",
-      "items": [{ "ingredient": "lettuce", "prep": "chopped" }, { "ingredient": "tomato", "prep": "whole" }],
+      "key": "lettuce+tomato",
       "name": "田园沙拉",
       "points": 16,
       "t": 41,
@@ -473,9 +743,7 @@
     },
     {
       "id": "o3",
-      "recipeId": "carrot_soup",
-      "key": "carrot:chopped+carrot:chopped+carrot:chopped",
-      "items": [{ "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "carrot", "prep": "chopped" }],
+      "key": "carrot+carrot+carrot",
       "name": "胡萝卜浓汤",
       "points": 22,
       "t": 73,
@@ -483,23 +751,25 @@
     },
     {
       "id": "o4",
-      "recipeId": "crisp_salad",
-      "key": "carrot:chopped+lettuce:whole",
-      "items": [{ "ingredient": "carrot", "prep": "chopped" }, { "ingredient": "lettuce", "prep": "whole" }],
+      "key": "carrot+lettuce",
       "name": "爽脆沙拉",
       "points": 18,
       "t": 55,
       "total": 80
     }
   ],
-  "nextOrderIn": 4.9,
+  "nextOrderIn": 4.800000000000001,
   "plates": {
-    "clean": 4,
+    "clean": 5,
     "dirty": 1,
     "washT": 0,
     "due": [
       4.5
-    ]
+    ],
+    "cleanCredits": []
   },
-  "orderSeq": 0
+  "orderSeq": 0,
+  "groundBuff": null,
+  "nextBuffIn": 24.799999999999997,
+  "fireOverdriveRemaining": 0
 }

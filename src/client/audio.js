@@ -315,6 +315,7 @@ export function createAudioEngine() {
         break;
       case 'burnt': for (let i = 0; i < 3; i++) tone(225, t + i * 0.16, 0.11, { type: 'square', volume: 0.07 }); break;
       case 'dirty': notes([64, 59], 0.07, 0.08, 0.055, 'square'); break;
+      case 'gateWarning': for(let i=0;i<3;i++)tone(610+i*70,t+i*.12,.08,{type:'square',volume:.065}); break;
       case 'start': notes([60, 67, 72, 79], 0.075, 0.18, 0.105); break;
       case 'over': notes([72, 76, 79, 84], 0.14, 0.32, 0.085); break;
       case 'join': notes([72, 76], 0.07, 0.11, 0.065, 'sine'); break;

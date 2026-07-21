@@ -44,9 +44,19 @@ const BUFF_WEIGHTS = [2, 2, 2, 1];
 const BUFF_DURATION = 15;
 const BUFF_LIFETIME = 18;
 const FIRE_OVERDRIVE_DURATION = 10;
+const THROW_THRESHOLD = 0.3;
+const THROW_FULL_TIME = 1.2;
+const THROW_MIN_RANGE = 1.5;
+const THROW_MAX_RANGE = 5.5;
+const THROW_TIMEOUT = 3;
+const WORLD_ITEM_LIFETIME = 20;
+const WORLD_ITEM_LIMIT = 48;
+const FALL_TIME = 0.8;
+const RESPAWN_GRACE = 0.6;
+const INTERACT_COOLDOWN = 0.12;
 
 const PLAYER_COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71'];
-const STAT_KEYS = ['chops', 'washes', 'assembles', 'potAdds', 'potPickups', 'deliveries', 'fastServes', 'clutchServes', 'burnClears', 'discards'];
+const STAT_KEYS = ['chops', 'washes', 'assembles', 'potAdds', 'potPickups', 'deliveries', 'fastServes', 'clutchServes', 'burnClears', 'discards', 'throws', 'catches', 'groundPickups', 'falls', 'conveyorTransfers'];
 
 function emptyStats() {
   const out = {};
@@ -162,6 +172,9 @@ const TITLE_COPY = {
   backstage: [['🌟','无名英雄'],['🎬','幕后大厨'],['🌙','深藏功与名']],
   improving: [['📈','后来居上'],['📈','渐入佳境'],['🌱','逆风生长']],
   noWaste: [['♻️','物尽其用'],['♻️','勤俭持厨'],['📦','食材管理大师']],
+  throws: [['🎯','隔空传菜王'],['🏹','厨房神投手'],['🛫','飞菜航线员']],
+  catches: [['🙌','神接球'],['🧤','稳稳接住'],['🤹','空中接菜师']],
+  conveyorTransfers: [['⚙️','物流总管'],['📦','传送带专家'],['🚚','厨房调度员']],
   fallback: [['👍','靠谱厨友'],['✨','锅铲新星'],['🎖️','今日有功'],['🦸','围裙侠'],['🎉','厨房气氛组']],
 };
 
@@ -230,153 +243,241 @@ const RECIPE_BY_KEY = {};
 for (const r of RECIPES) RECIPE_BY_KEY[recipeKey(r.items)] = r;
 
 // ---------------------------------------------------------------------------
-// 地图
-// 图例：# 墙  . 地板  C 台面  B 砧板  S 灶台(锅)  P 盘子架  K 水槽
-//       W 出菜口  X 垃圾桶  T/O/M/L/U 食材箱  1-4 出生点
+// 全新地图定义：运行时只暴露 bounds / terrain / platforms / stations /
+// mechanisms / checkpoints / spawns，不保留旧网格协议。
 // ---------------------------------------------------------------------------
+function terrain(w, h, floor, ice = () => false, empty = '~') {
+  const rows = [];
+  for (let z = 0; z < h; z++) {
+    let row = '';
+    for (let x = 0; x < w; x++) row += floor(x, z) ? (ice(x, z) ? 'i' : '.') : empty;
+    rows.push(row);
+  }
+  return rows;
+}
+function terrainWithWalls(w, h, kindAt, { empty = ' ', openings = [] } = {}) {
+  const openingSet = new Set(openings.map((entry) => `${entry.x},${entry.z}`));
+  const cells = Array.from({ length:h }, (_, z) => Array.from({ length:w }, (_, x) => kindAt(x,z) || empty));
+  const safe = (cell) => cell === '.' || cell === 'i';
+  for (let z = 0; z < h; z++) for (let x = 0; x < w; x++) {
+    if (cells[z][x] !== empty || openingSet.has(`${x},${z}`)) continue;
+    const bordersFloor = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dz]) => safe(cells[z+dz]?.[x+dx]));
+    if (bordersFloor) cells[z][x] = '#';
+  }
+  return cells.map((row) => row.join(''));
+}
+function st(id, type, x, z, extra = {}) { return { id, type, x, z, ...extra }; }
+function crate(id, ingredient, x, z, extra = {}) { return st(id, 'crate', x, z, { crate: ingredient, ...extra }); }
+function conveyorPort(id, x, z, conveyorId, portMode, pathPoint, extra = {}) {
+  return st(id, 'conveyorPort', x, z, { conveyorId, portMode, pathPoint, ...extra });
+}
+function rectTiles(w, h, kind = '.') {
+  const out = [];
+  for (let z = 0; z < h; z++) for (let x = 0; x < w; x++) out.push({ x, z, kind });
+  return out;
+}
+function path(points, speed = 1, extra = {}) { return { points, speed, ...extra }; }
+
 const MAPS = {
   classic: {
-    name: '经典厨房',
-    desc: '动线宽敞的新手厨房，订单以番茄/洋葱/胡萝卜系为主，适合磨合配合。',
-    plates: 4,
-    pool: ['tomato_soup', 'onion_soup', 'carrot_soup', 'garden_salad', 'crisp_salad'],
-    grid: [
-      '###############',
-      '#T.R...C.C..O.#',
-      '#..1.......2..#',
-      '#C.C...P...C.C#',
-      '#.....CCC.....#',
-      '#B.B.X.K..S.S.#',
-      '#L..3.....4..U#',
-      '#C.C.......C.C#',
-      '#######W#######',
-    ],
+    id: 'classic', name: '经典厨房', desc: '围墙花园厨房以双环动线和短传送带教授分工。', bounds: { w: 18, h: 13 }, plateCount: 4,
+    recipePool: ['tomato_soup','onion_soup','carrot_soup','garden_salad','crisp_salad'],
+    terrain: terrainWithWalls(18,13,(x,z)=>x>=1&&x<=16&&z>=1&&z<=11?'.':' '),
+    platforms: [],
+    stations: [crate('tomato','tomato',1,2),crate('onion','onion',4,1),crate('carrot','carrot',8,1),crate('lettuce','lettuce',12,1),crate('cucumber','cucumber',16,2),
+      st('board_a','board',3,4),st('board_b','board',3,8),st('counter_a','counter',6,4),st('counter_b','counter',9,4),st('counter_c','counter',6,8),st('counter_d','counter',9,8),
+      conveyorPort('prep_in',5,6,'prep_belt','input',{x:5.5,z:6.5}),conveyorPort('prep_out',12,6,'prep_belt','output',{x:12.5,z:6.5}),
+      st('stove_a','stove',7,10),st('stove_b','stove',10,10),st('plates','plates',15,9),st('sink','sink',1,9),st('trash','trash',13,10),st('window','window',16,6)],
+    mechanisms: [{ id:'prep_belt', type:'conveyor', config:{ path:path([{x:5.5,z:6.5},{x:12.5,z:6.5}],1) } }],
+    checkpoints: [{id:'garden',x:8.5,z:5.5}], spawns: [{slot:1,x:4.5,z:6.5},{slot:2,x:14.5,z:6.5},{slot:3,x:5.5,z:9.5},{slot:4,x:12.5,z:9.5}], camera:{minPixelsPerTile:44},
   },
   split: {
-    name: '一线天',
-    desc: '台面高墙把厨房劈成两半，只有一条通道，记得隔空递菜！',
-    plates: 4,
-    pool: ['mushroom_soup', 'potato_soup', 'garden_salad', 'garden_stew', 'crisp_salad'],
-    grid: [
-      '######W########',
-      '#T.O.L.M.R.V.X#',
-      '#..1....C..2..#',
-      '#B......C....B#',
-      '#.......3.4...#',
-      '#B......C....B#',
-      '#..K....C..S..#',
-      '#..S....C...P.#',
-      '###############',
+    id:'split', name:'一线天', desc:'两座浮岛反相移动，渡台是唯一人员通路。', bounds:{w:22,h:14}, plateCount:4,
+    recipePool:['mushroom_soup','potato_soup','garden_salad','garden_stew','crisp_salad'],
+    terrain: terrain(22,14,()=>false),
+    platforms:[
+      {id:'west',origin:{x:2,z:2},tiles:rectTiles(6,9),motion:{axis:{x:0,z:1},amplitude:.8,period:16,phase:0,easing:'sine'}},
+      {id:'east',origin:{x:12,z:2},tiles:rectTiles(6,9),motion:{axis:{x:0,z:1},amplitude:.8,period:16,phase:0.5,easing:'sine'}},
+      {id:'ferry',origin:{x:9,z:6},tiles:rectTiles(2,2),motion:{axis:{x:1,z:0},amplitude:2,period:12,phase:0,easing:'sine'}},
     ],
+    stations:[crate('tomato','tomato',0,1,{supportId:'west'}),crate('onion','onion',0,3,{supportId:'west'}),crate('lettuce','lettuce',0,5,{supportId:'west'}),crate('carrot','carrot',0,7,{supportId:'west'}),crate('mushroom','mushroom',2,0,{supportId:'west'}),crate('potato','potato',4,0,{supportId:'west'}),
+      st('board_w','board',2,2,{supportId:'west'}),st('board_w2','board',4,2,{supportId:'west'}),st('sink','sink',2,8,{supportId:'west'}),st('trash','trash',0,8,{supportId:'west'}),st('counter_w','counter',5,4,{supportId:'west'}),
+      st('stove_a','stove',2,5,{supportId:'east'}),st('stove_b','stove',4,5,{supportId:'east'}),st('plates','plates',4,8,{supportId:'east'}),st('window','window',5,4,{supportId:'east'}),st('counter_e','counter',0,4,{supportId:'east'}),st('counter_e2','counter',2,8,{supportId:'east'})],
+    mechanisms:[{id:'islands',type:'movingPlatform',config:{platformIds:['west','east','ferry']}},{id:'river',type:'waterHazard',config:{}}],
+    checkpoints:[{id:'west_safe',x:3.5,z:4.5,supportId:'west'},{id:'east_safe',x:3.5,z:4.5,supportId:'east'}],
+    spawns:[{slot:1,x:3.5,z:4.5,supportId:'west'},{slot:2,x:3.5,z:4.5,supportId:'east'},{slot:3,x:4.5,z:7.5,supportId:'west'},{slot:4,x:1.5,z:7.5,supportId:'east'}],camera:{minPixelsPerTile:44},
   },
   ring: {
-    name: '环岛餐吧',
-    desc: '灶台集中在中央环岛，十种菜谱全开，订单更密更考验分工。',
-    plates: 5,
-    pool: ['tomato_soup', 'onion_soup', 'carrot_soup', 'potato_soup', 'mushroom_soup', 'garden_stew', 'garden_salad', 'crisp_salad', 'deluxe_salad', 'rainbow_salad'],
-    grid: [
-      '#######W#######',
-      '#....P...P....#',
-      '#T.1.......2.O#',
-      '#..B.......B..#',
-      '#M...CSSSC...U#',
-      '#....C...C....#',
-      '#L...CCXCC...L#',
-      '#R.3.......4.V#',
-      '#..B..K.K..B..#',
-      '#.............#',
-      '###############',
-    ],
+    id:'ring',name:'环岛餐吧',desc:'外环切配、中央出餐，四个装卸口围绕换向循环带协作。',bounds:{w:21,h:17},plateCount:5,
+    recipePool:['tomato_soup','onion_soup','carrot_soup','potato_soup','mushroom_soup','garden_stew','garden_salad','crisp_salad','deluxe_salad','rainbow_salad'],
+    terrain:terrainWithWalls(21,17,(x,z)=>{const dx=(x-10)/9,dz=(z-8)/7;const outer=dx*dx+dz*dz<=1&&z<=14;const inner=(x-10)*(x-10)/25+(z-8)*(z-8)/16<=1;const center=x>=8&&x<=12&&z>=6&&z<=10;return outer&&(!inner||center)?'.':'~';},{empty:'~',openings:[{x:9,z:4},{x:10,z:4},{x:9,z:5},{x:10,z:5},{x:11,z:11},{x:12,z:11},{x:11,z:12},{x:12,z:12},{x:5,z:7},{x:6,z:7},{x:7,z:7},{x:5,z:8},{x:6,z:8},{x:7,z:8},{x:13,z:8},{x:14,z:8},{x:15,z:8},{x:13,z:9},{x:14,z:9},{x:15,z:9}]}),platforms:[],
+    stations:[crate('tomato','tomato',2,6),crate('onion','onion',4,3),crate('mushroom','mushroom',8,2),crate('lettuce','lettuce',15,3),crate('cucumber','cucumber',18,6),crate('carrot','carrot',17,11),crate('potato','potato',10,14),
+      st('board_n','board',6,3),st('board_s','board',15,13),st('sink','sink',6,13),
+      conveyorPort('ring_in_w',4,8,'ring_belt','input',{x:8.5,z:8.5}),conveyorPort('ring_in_e',16,8,'ring_belt','input',{x:12.5,z:8.5}),
+      conveyorPort('ring_out_n',10,6,'ring_belt','output',{x:10.5,z:6.5}),conveyorPort('ring_out_s',10,10,'ring_belt','output',{x:10.5,z:10.5}),
+      st('stove_a','stove',9,7),st('trash','trash',10,7),st('stove_b','stove',11,7),st('plates','plates',9,9),st('stove_c','stove',10,9),st('window','window',11,9)],
+    mechanisms:[{id:'ring_belt',type:'conveyor',config:{path:path([{x:12.5,z:10.5},{x:8.5,z:10.5},{x:8.5,z:6.5},{x:12.5,z:6.5},{x:12.5,z:10.5}],1,{loop:true}),reverseEvery:20,warning:3}}],
+    hazardMarkers:[{x:10.5,z:4.5},{x:11.5,z:11.5},{x:6.5,z:7.5},{x:14.5,z:8.5}],
+    checkpoints:[{id:'outer',x:4.5,z:9.5},{id:'center',x:10.5,z:8.5}],spawns:[{slot:1,x:4.5,z:9.5},{slot:2,x:9.5,z:8.5},{slot:3,x:16.5,z:9.5},{slot:4,x:11.5,z:8.5}],camera:{minPixelsPerTile:44},
   },
   snow: {
-    name: '雪山餐车', desc: '冰面惯性延长刹车距离，干活可立即停稳。', plates: 5,
-    movementProfile: { speed: SPEED, stopTime: 0.65, turnTime: 0.25 }, mechanic: { type: 'ice' },
-    pool: ['potato_soup','mushroom_soup','cheese_potato_soup','mushroom_meat_soup','cheese_salad'],
-    grid: [
-      '#######W#######', '#V.M.H...L.TAO#', '#.1..C....2...#', '#B.B...C..B.B.#',
-      '#.....CCC.....#', '#S.S...X..S.S.#', '#.3...C....4..#', '#K...P.C.P..K.#', '###############',
+    id:'snow',name:'雪山餐车',desc:'三座有护墙的餐车以冰桥、石道和缆车跨越裂谷。',bounds:{w:23,h:14},plateCount:5,
+    recipePool:['potato_soup','mushroom_soup','cheese_potato_soup','mushroom_meat_soup','cheese_salad'],
+    terrain:terrainWithWalls(23,14,(x,z)=>{const west=x>=1&&x<=6&&z>=2&&z<=8,east=x>=16&&x<=21&&z>=2&&z<=8,center=x>=8&&x<=14&&z>=4&&z<=12,iceBridge=(x===7||x===15)&&(z===4||z===5),stoneBridge=(x===7||x===15)&&(z===7||z===8);return west||east||center||iceBridge||stoneBridge?(iceBridge?'i':'.'):'~';},{empty:'~',openings:[{x:7,z:6},{x:15,z:6}]}),
+    platforms:[],
+    stations:[crate('potato','potato',1,3),crate('mushroom','mushroom',3,2),crate('cheese','cheese',5,2),crate('meat','meat',21,3),crate('onion','onion',19,2),crate('lettuce','lettuce',17,2),crate('tomato','tomato',21,6),
+      st('board_a','board',3,7),st('board_b','board',19,7),st('stove_a','stove',9,10),st('stove_b','stove',12,10),st('plates','plates',14,8),st('sink','sink',8,11),st('trash','trash',10,4),st('window','window',12,12),
+      conveyorPort('lift_in',5,5,'ski_lift','input',{x:5.5,z:5.5}),conveyorPort('lift_out',14,5,'ski_lift','output',{x:14.5,z:5.5})],
+    mechanisms:[{id:'ice',type:'iceSurface',config:{stopTime:0.65,turnTime:0.25}},{id:'ski_lift',type:'conveyor',config:{path:path([{x:5.5,z:5.5},{x:14.5,z:5.5}],1)}},{id:'ravine',type:'waterHazard',config:{}}],
+    hazards:[
+      {id:'west_crevasse',type:'iceCrevasse',cells:[{x:7,z:6}],guardEdges:['north','south']},
+      {id:'east_crevasse',type:'iceCrevasse',cells:[{x:15,z:6}],guardEdges:['north','south']},
     ],
+    checkpoints:[{id:'lower',x:11.5,z:8.5},{id:'west',x:4.5,z:6.5},{id:'east',x:17.5,z:5.5}],spawns:[{slot:1,x:4.5,z:6.5},{slot:2,x:17.5,z:5.5},{slot:3,x:9.5,z:8.5},{slot:4,x:13.5,z:8.5}],camera:{minPixelsPerTile:44},
   },
   space: {
-    name: '太空厨房', desc: '台面食材会被预告并随机漂移。', plates: 5,
-    mechanic: { type: 'floating_food', interval: 25, warning: 3 },
-    pool: ['golden_risotto','mushroom_risotto','meat_sauce_soup','power_salad','party_platter'],
-    grid: [
-      '#######W#######', '#I...P...P...A#', '#.1.........3.#', '#T.B..CCCCC..B#',
-      '#O...CS.2.SC.M#', '#....C.SXS.C..#', '#L.B..CCCCC..B#', '#.4...........#', '#U.R.K...K...H#', '###############',
-    ],
+    id:'space',name:'太空厨房',desc:'三座封闭舱室以货运气闸和底部勤务道协作。',bounds:{w:24,h:16},plateCount:5,
+    recipePool:['mushroom_risotto','meat_sauce_soup','power_salad','deluxe_salad','party_platter'],
+    terrain:terrainWithWalls(24,16,(x,z)=>(x>=1&&x<=6&&z>=3&&z<=11)||(x>=17&&x<=22&&z>=3&&z<=11)||(x>=9&&x<=14&&z>=5&&z<=10)||(x>=6&&x<=17&&z>=11&&z<=12)?'.':' '),
+    platforms:[],
+    stations:[crate('rice','rice',1,4),crate('onion','onion',1,6),crate('tomato','tomato',1,8),crate('cucumber','cucumber',1,10),st('board_w','board',4,4),st('sink','sink',4,10),conveyorPort('airlock_w',6,7,'airlock_w_belt','input',{x:6.5,z:7.5}),
+      crate('mushroom','mushroom',22,4),crate('meat','meat',22,6),crate('lettuce','lettuce',22,8),crate('cheese','cheese',22,10),st('board_e','board',19,4),st('plates','plates',19,10),conveyorPort('airlock_e',17,7,'airlock_e_belt','input',{x:17.5,z:7.5}),
+      st('stove_a','stove',10,6),st('stove_b','stove',13,6),st('stove_c','stove',11,9),st('trash','trash',13,9),st('window','window',11,5),conveyorPort('counter_core_w',9,8,'airlock_w_belt','output',{x:9.5,z:8.5}),conveyorPort('counter_core_e',14,8,'airlock_e_belt','output',{x:14.5,z:8.5})],
+    mechanisms:[{id:'airlock_w_belt',type:'conveyor',config:{path:path([{x:6.5,z:7.5},{x:9.5,z:7.5},{x:9.5,z:8.5}],1)}},{id:'airlock_e_belt',type:'conveyor',config:{path:path([{x:17.5,z:7.5},{x:14.5,z:7.5},{x:14.5,z:8.5}],1)}},{id:'void',type:'waterHazard',config:{}}],
+    checkpoints:[{id:'core',x:11.5,z:8.5},{id:'outer_link',x:11.5,z:12.5},{id:'west',x:4,z:7},{id:'east',x:20,z:7}],spawns:[{slot:1,x:4,z:7},{slot:2,x:11.5,z:8.5},{slot:3,x:20,z:7},{slot:4,x:5.5,z:10.5}],camera:{minPixelsPerTile:44},
   },
   castle: {
-    name: '城堡宴会厅', desc: '上下城门交替开放，随时改变左右半场路线。', plates: 5,
-    mechanic: { type: 'gate', gates: [{ id: 'top', x: 7, z: 3 }, { id: 'bottom', x: 7, z: 7 }], switchTime: 15, warning: 3 },
-    pool: ['garden_stew','deluxe_salad','meat_sauce_soup','cheese_potato_soup','golden_risotto','cheese_salad','party_platter'],
-    grid: [
-      '##W#########W##', '#T.O.H.#I.MA..#', '#..1...#...2..#', '#B.C...D...C.B#',
-      '#..P.C.#.C.P..#', '#K...S.#.S...K#', '#.3X.C.#.C.X4.#', '#B.C...D...C.B#', '#L.U.R.#..V...#', '###############',
-    ],
+    id:'castle',name:'城堡宴会厅',desc:'四翼宴会厅以随机门阵改变中央捷径，外围勤务道始终开放。',bounds:{w:23,h:17},plateCount:5,
+    recipePool:['garden_stew','deluxe_salad','meat_sauce_soup','cheese_potato_soup','golden_risotto','cheese_salad','party_platter'],
+    terrain:terrainWithWalls(23,17,(x,z)=>{const hall=x>=9&&x<=13&&z>=6&&z<=10,north=x>=9&&x<=13&&z>=1&&z<=4,south=x>=9&&x<=13&&z>=12&&z<=15,west=x>=1&&x<=7&&z>=6&&z<=10,east=x>=15&&x<=21&&z>=6&&z<=10,necks=(z===5&&x>=10&&x<=12)||(z===11&&x>=10&&x<=12)||(x===8&&z>=7&&z<=9)||(x===14&&z>=7&&z<=9),ring=(x>=4&&x<=18&&(z===3||z===4||z===12||z===13))||((x===4||x===5||x===17||x===18)&&z>=3&&z<=13);return hall||north||south||west||east||necks||ring?'.':' ';}),platforms:[],
+    stations:[crate('tomato','tomato',1,7),crate('onion','onion',1,9),crate('cheese','cheese',3,6),crate('rice','rice',9,2),crate('mushroom','mushroom',13,2),crate('meat','meat',19,6),crate('lettuce','lettuce',21,7),crate('cucumber','cucumber',21,9),crate('carrot','carrot',9,12),crate('potato','potato',13,12),
+      st('board_w','board',6,8),st('board_e','board',16,8),st('stove_a','stove',10,7),st('stove_b','stove',12,7),st('stove_c','stove',11,9),st('plates','plates',10,15),st('sink','sink',12,15),st('trash','trash',12,13),st('window','window',11,1),st('counter_w','counter',9,9),st('counter_e','counter',13,9)],
+    mechanisms:[{id:'royal_gates',type:'gate',config:{groups:[
+      {id:'north',label:'北门',orientation:'x',cells:[{x:10,z:5},{x:11,z:5},{x:12,z:5}]},
+      {id:'east',label:'东门',orientation:'z',cells:[{x:14,z:7},{x:14,z:8},{x:14,z:9}]},
+      {id:'south',label:'南门',orientation:'x',cells:[{x:10,z:11},{x:11,z:11},{x:12,z:11}]},
+      {id:'west',label:'西门',orientation:'z',cells:[{x:8,z:7},{x:8,z:8},{x:8,z:9}]},
+    ],presets:[
+      {id:'north_south',label:'南北通路',open:['north','south']},{id:'east_west',label:'东西通路',open:['east','west']},
+      {id:'north_east',label:'北东通路',open:['north','east']},{id:'south_west',label:'南西通路',open:['south','west']},
+    ],switchEvery:16,warning:4}}],
+    checkpoints:[{id:'hall',x:11.5,z:8.5},{id:'north_safe',x:11.5,z:3.5},{id:'south_safe',x:11.5,z:13.5},{id:'west_safe',x:5.5,z:8.5},{id:'east_safe',x:17.5,z:8.5}],spawns:[{slot:1,x:5.5,z:8.5},{slot:2,x:17.5,z:8.5},{slot:3,x:11.5,z:13.5},{slot:4,x:11.5,z:3.5}],camera:{minPixelsPerTile:44},
   },
 };
 
-for (const mapId in MAPS) {
-  const rows = MAPS[mapId].grid;
-  if (!rows.length || rows.some((row) => row.length !== rows[0].length)) throw new Error(`Invalid map width: ${mapId}`);
-  const slots = rows.join('').match(/[1-4]/g) || [];
-  if (slots.length !== 4 || new Set(slots).size !== 4) throw new Error(`Invalid spawn slots: ${mapId}`);
+function cloneLayout(map) {
+  return {
+    mapId: map.id, name: map.name, bounds: map.bounds, terrain: map.terrain,
+    platforms: map.platforms.map((p) => ({ ...p, origin:{...p.origin}, tiles:p.tiles.map((t)=>({...t})), motion:p.motion&&{...p.motion,axis:{...p.motion.axis}} })),
+    stations: map.stations.map((entry)=>({...entry})), mechanisms: map.mechanisms.map((m)=>({id:m.id,type:m.type,config:JSON.parse(JSON.stringify(m.config))})),
+    checkpoints: map.checkpoints.map((c)=>({...c})), spawns: map.spawns.map((spawn)=>({...spawn})),
+    hazardMarkers:(map.hazardMarkers||[]).map((entry)=>({...entry})), hazards:(map.hazards||[]).map((entry)=>({...entry,cells:entry.cells.map((cell)=>({...cell})),guardEdges:[...(entry.guardEdges||[])]})), camera:{...map.camera},
+  };
 }
 
-function parseMap(mapId) {
-  const map = MAPS[mapId];
-  const h = map.grid.length;
-  const w = map.grid[0].length;
-  const cells = new Array(w * h);
-  const spawns = [];
-  const stationAt = {};
-  for (let z = 0; z < h; z++) {
-    for (let x = 0; x < w; x++) {
-      const ch = map.grid[z][x];
-      let cell = '.';
-      let st = null;
-      if (ch === '#') cell = '#';
-      else if (ch >= '1' && ch <= '4') { spawns.push({ x, z, slot: Number(ch) }); }
-      else if (ch === 'C') { cell = 'C'; st = { x, z, type: 'counter' }; }
-      else if (ch === 'B') { cell = 'B'; st = { x, z, type: 'board' }; }
-      else if (ch === 'S') { cell = 'S'; st = { x, z, type: 'stove' }; }
-      else if (ch === 'P') { cell = 'P'; st = { x, z, type: 'plates' }; }
-      else if (ch === 'K') { cell = 'K'; st = { x, z, type: 'sink' }; }
-      else if (ch === 'W') { cell = 'W'; st = { x, z, type: 'window' }; }
-      else if (ch === 'X') { cell = 'X'; st = { x, z, type: 'trash' }; }
-      else if (ch === 'D') { cell = '.'; }
-      else if (CRATES[ch]) { cell = 'G'; st = { x, z, type: 'crate', crate: CRATES[ch] }; }
-      cells[z * w + x] = cell;
-      if (st) stationAt[x + ',' + z] = st;
+for (const map of Object.values(MAPS)) {
+  if (map.terrain.length !== map.bounds.h || map.terrain.some((row)=>row.length !== map.bounds.w)) throw new Error(`Invalid terrain: ${map.id}`);
+  if (map.spawns.length !== 4 || new Set(map.spawns.map((spawn)=>spawn.slot)).size !== 4) throw new Error(`Invalid spawns: ${map.id}`);
+  const ids = [...map.stations,...map.platforms,...map.mechanisms].map((entry)=>entry.id);
+  if (new Set(ids).size !== ids.length) throw new Error(`Duplicate map id: ${map.id}`);
+  for (const mechanism of map.mechanisms.filter((entry)=>entry.type==='conveyor')) {
+    const points=mechanism.config.path.points;
+    if(points.length<2)throw new Error(`Invalid conveyor path: ${map.id}:${mechanism.id}`);
+    for(let index=1;index<points.length;index++){
+      const dx=points[index].x-points[index-1].x,dz=points[index].z-points[index-1].z;
+      if((Math.abs(dx)<1e-9&&Math.abs(dz)<1e-9)||(Math.abs(dx)>1e-9&&Math.abs(dz)>1e-9))throw new Error(`Conveyor segments must be orthogonal: ${map.id}:${mechanism.id}`);
+    }
+    const ports=map.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.conveyorId===mechanism.id);
+    if(!ports.some((entry)=>entry.portMode==='input')||!ports.some((entry)=>entry.portMode==='output'))throw new Error(`Conveyor ports missing: ${map.id}:${mechanism.id}`);
+    for(const port of ports){
+      if(!['input','output'].includes(port.portMode))throw new Error(`Invalid conveyor port mode: ${map.id}:${port.id}`);
+      let nearest=Infinity;for(let index=1;index<points.length;index++){const a=points[index-1],b=points[index],vx=b.x-a.x,vz=b.z-a.z,len2=vx*vx+vz*vz,t=Math.max(0,Math.min(1,((port.pathPoint.x-a.x)*vx+(port.pathPoint.z-a.z)*vz)/len2)),px=a.x+vx*t,pz=a.z+vz*t;nearest=Math.min(nearest,Math.hypot(port.pathPoint.x-px,port.pathPoint.z-pz));}
+      if(nearest>1e-6)throw new Error(`Conveyor port is not on path: ${map.id}:${port.id}`);
     }
   }
-  spawns.sort((a, b) => a.slot - b.slot);
-  return { mapId, name: map.name, w, h, cells, spawns, stationAt, movementProfile: map.movementProfile || null, mechanic: map.mechanic || null, dynamicBlocked: {} };
+  for(const port of map.stations.filter((entry)=>entry.type==='conveyorPort'))if(!map.mechanisms.some((entry)=>entry.type==='conveyor'&&entry.id===port.conveyorId))throw new Error(`Unknown conveyor port target: ${map.id}:${port.id}`);
 }
 
 // ---------------------------------------------------------------------------
 // 碰撞与寻位
 // ---------------------------------------------------------------------------
-function isBlocked(L, cx, cz) {
-  if (cx < 0 || cz < 0 || cx >= L.w || cz >= L.h) return true;
-  if (L.dynamicBlocked && L.dynamicBlocked[cx + ',' + cz]) return true;
-  return L.cells[cz * L.w + cx] !== '.';
+function platformOrigin(L, runtime, supportId) {
+  const def = L.platforms.find((entry) => entry.id === supportId);
+  const state = runtime?.platforms?.[supportId];
+  return def ? { x:def.origin.x + (state?.x || 0), z:def.origin.z + (state?.z || 0) } : { x:0, z:0 };
+}
+function worldPoint(L, runtime, value) {
+  const origin = value.supportId ? platformOrigin(L, runtime, value.supportId) : {x:0,z:0};
+  return { x:value.x + origin.x, z:value.z + origin.z };
+}
+function terrainAt(L, runtime, x, z) {
+  for (const platform of L.platforms) {
+    const origin = platformOrigin(L, runtime, platform.id);
+    for (const tile of platform.tiles) {
+      if (x >= origin.x + tile.x && x < origin.x + tile.x + 1 && z >= origin.z + tile.z && z < origin.z + tile.z + 1) return { kind:tile.kind, supportId:platform.id };
+    }
+  }
+  const cx = Math.floor(x), cz = Math.floor(z);
+  if (cx < 0 || cz < 0 || cx >= L.bounds.w || cz >= L.bounds.h) return {kind:' '};
+  return {kind:L.terrain[cz][cx]};
+}
+function stationWorld(L, runtime, station) {
+  const point = worldPoint(L, runtime, station);
+  return {...station,x:point.x,z:point.z};
+}
+function conveyorRects(L, runtime, width=.8) {
+  const rects=[];
+  for(const def of L.mechanisms.filter((entry)=>entry.type==='conveyor')){
+    const origin=def.config.supportId?platformOrigin(L,runtime,def.config.supportId):{x:0,z:0};
+    const points=def.config.path.points.map((point)=>({x:point.x+origin.x,z:point.z+origin.z}));
+    for(let index=1;index<points.length;index++){
+      const a=points[index-1],b=points[index],half=width/2;
+      rects.push({x:Math.min(a.x,b.x)-half,z:Math.min(a.z,b.z)-half,w:Math.abs(b.x-a.x)+width,h:Math.abs(b.z-a.z)+width,kind:'conveyor'});
+    }
+  }
+  return rects;
+}
+function hazardGuardRects(L) {
+  const rects=[],thickness=.16;
+  for(const hazard of L.hazards||[])for(const cell of hazard.cells||[])for(const edge of hazard.guardEdges||[]){
+    if(edge==='north')rects.push({x:cell.x,z:cell.z-thickness/2,w:1,h:thickness,kind:'hazardGuard'});
+    if(edge==='south')rects.push({x:cell.x,z:cell.z+1-thickness/2,w:1,h:thickness,kind:'hazardGuard'});
+    if(edge==='west')rects.push({x:cell.x-thickness/2,z:cell.z,w:thickness,h:1,kind:'hazardGuard'});
+    if(edge==='east')rects.push({x:cell.x+1-thickness/2,z:cell.z,w:thickness,h:1,kind:'hazardGuard'});
+  }
+  return rects;
+}
+function blockingRects(L, runtime) {
+  const rects = [];
+  for (let z=0;z<L.bounds.h;z++) for (let x=0;x<L.bounds.w;x++) if (L.terrain[z][x] === '#') rects.push({x,z,w:1,h:1});
+  for (const station of L.stations) { const p=stationWorld(L,runtime,station); rects.push({x:p.x,z:p.z,w:1,h:1}); }
+  rects.push(...conveyorRects(L,runtime),...hazardGuardRects(L));
+  for (const state of Object.values(runtime?.mechanisms || {})) if (state?.type === 'gate') for (const gate of state.gates || []) if (!gate.open) for (const cell of gate.cells || [gate]) rects.push({x:cell.x,z:cell.z,w:1,h:1});
+  return rects;
+}
+function projectileBlockingRects(L, runtime) {
+  const rects = [];
+  for (let z=0;z<L.bounds.h;z++) for (let x=0;x<L.bounds.w;x++) if (L.terrain[z][x] === '#') rects.push({x,z,w:1,h:1});
+  for (const state of Object.values(runtime?.mechanisms || {})) if (state?.type === 'gate') for (const gate of state.gates || []) if (!gate.open) for (const cell of gate.cells || [gate]) rects.push({x:cell.x,z:cell.z,w:1,h:1});
+  return rects;
+}
+function segmentHitsRect(from, to, rect) {
+  const dx=to.x-from.x,dz=to.z-from.z;
+  let near=0,far=1;
+  for(const [start,delta,min,max] of [[from.x,dx,rect.x,rect.x+rect.w],[from.z,dz,rect.z,rect.z+rect.h]]){
+    if(Math.abs(delta)<1e-9){if(start<min||start>max)return false;continue;}
+    let a=(min-start)/delta,b=(max-start)/delta;if(a>b)[a,b]=[b,a];near=Math.max(near,a);far=Math.min(far,b);if(near>far)return false;
+  }
+  return far>=0&&near<=1;
 }
 
-function resolvePlayerCollision(L, p) {
+function resolvePlayerCollision(L, runtime, p) {
+  const rects = blockingRects(L,runtime);
   for (let pass = 0; pass < MOVE_SOLVER_PASSES; pass++) {
     let resolved = false;
-    const minX = Math.floor(p.x - PLAYER_R);
-    const maxX = Math.floor(p.x + PLAYER_R);
-    const minZ = Math.floor(p.z - PLAYER_R);
-    const maxZ = Math.floor(p.z + PLAYER_R);
-
-    for (let j = minZ; j <= maxZ; j++) {
-      for (let i = minX; i <= maxX; i++) {
-        if (!isBlocked(L, i, j)) continue;
-        const nearestX = Math.max(i, Math.min(p.x, i + 1));
-        const nearestZ = Math.max(j, Math.min(p.z, j + 1));
+    for (const rect of rects) {
+        const nearestX = Math.max(rect.x, Math.min(p.x, rect.x + rect.w));
+        const nearestZ = Math.max(rect.z, Math.min(p.z, rect.z + rect.h));
         let nx = p.x - nearestX;
         let nz = p.z - nearestZ;
         const distanceSq = nx * nx + nz * nz;
@@ -390,10 +491,10 @@ function resolvePlayerCollision(L, p) {
           penetration = PLAYER_R - distance;
         } else {
           const exits = [
-            { d: p.x - (i - PLAYER_R), nx: -1, nz: 0 },
-            { d: i + 1 + PLAYER_R - p.x, nx: 1, nz: 0 },
-            { d: p.z - (j - PLAYER_R), nx: 0, nz: -1 },
-            { d: j + 1 + PLAYER_R - p.z, nx: 0, nz: 1 },
+            { d: p.x - (rect.x - PLAYER_R), nx: -1, nz: 0 },
+            { d: rect.x + rect.w + PLAYER_R - p.x, nx: 1, nz: 0 },
+            { d: p.z - (rect.z - PLAYER_R), nx: 0, nz: -1 },
+            { d: rect.z + rect.h + PLAYER_R - p.z, nx: 0, nz: 1 },
           ];
           exits.sort((a, b) => a.d - b.d);
           ({ d: penetration, nx, nz } = exits[0]);
@@ -407,7 +508,6 @@ function resolvePlayerCollision(L, p) {
           p.vz -= intoSurface * nz;
         }
         resolved = true;
-      }
     }
     if (!resolved) break;
   }
@@ -446,11 +546,16 @@ function resolvePlayerBodies(p, others) {
   }
 }
 
-function stepPlayerMovement(L, p, input, dt, otherPlayers) {
+function movementProfileAt(L, runtime, p) {
+  const kind = terrainAt(L,runtime,p.x,p.z).kind;
+  const ice = L.mechanisms.find((entry)=>entry.type==='iceSurface');
+  return kind === 'i' && ice ? {speed:SPEED,stopTime:ice.config.stopTime,turnTime:ice.config.turnTime} : {};
+}
+function stepPlayerMovement(L, runtime, p, input, dt, otherPlayers) {
   const ix = Number(input && input.dx) || 0;
   const iz = Number(input && input.dz) || 0;
   const active = ix !== 0 || iz !== 0;
-  const profile = L.movementProfile || {};
+  const profile = movementProfileAt(L,runtime,p);
   const speedLimit = (profile.speed || SPEED) * (p.activeBuff && p.activeBuff.type === 'swift_feet' ? 1.25 : 1);
   const deceleration = speedLimit / (profile.stopTime || STOP_TIME);
   const turnTime = profile.turnTime || 0;
@@ -487,16 +592,22 @@ function stepPlayerMovement(L, p, input, dt, otherPlayers) {
 
     p.x += moveX;
     p.z += moveZ;
-    resolvePlayerCollision(L, p);
+    resolvePlayerCollision(L, runtime, p);
     resolvePlayerBodies(p, otherPlayers);
-    resolvePlayerCollision(L, p);
+    resolvePlayerCollision(L, runtime, p);
   }
 }
 
-function targetStation(L, p) {
-  const tx = Math.floor(p.x + p.face.dx * 0.95);
-  const tz = Math.floor(p.z + p.face.dz * 0.95);
-  return L.stationAt[tx + ',' + tz] || null;
+function targetStation(L, runtime, p) {
+  const tx = p.x + p.face.dx * 0.95;
+  const tz = p.z + p.face.dz * 0.95;
+  let best = null;
+  for (const station of L.stations) {
+    const world = stationWorld(L,runtime,station);
+    const distance = Math.hypot(tx-(world.x+0.5),tz-(world.z+0.5));
+    if (distance < 0.72 && (!best || distance < best.distance)) best={...world,distance};
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +620,8 @@ function armTick(ctx) {
 function tick(ctx) {
   const s = ctx.state;
   if (s.phase === 'countdown') {
+    s.elapsed += DT;
+    for(const def of s.layout.mechanisms.filter((entry)=>entry.type==='movingPlatform'))MECHANISM_REGISTRY.movingPlatform.tick(ctx,def,s.mechanisms[def.id]);
     s.countdown -= DT;
     if (s.countdown <= 0) {
       s.countdown = 0;
@@ -525,7 +638,7 @@ function tick(ctx) {
     for (const id of ids) {
       const p = s.players[id];
       if (p.input.dx || p.input.dz) { const len = Math.hypot(p.input.dx, p.input.dz); if (len > 0.2) p.face = { dx: p.input.dx / len, dz: p.input.dz / len }; }
-      stepPlayerMovement(s.layout, p, p.input, DT, ids.filter((other) => other !== id).map((other) => s.players[other]));
+      stepPlayerMovement(s.layout, {platforms:s.platforms,mechanisms:s.mechanisms}, p, p.input, DT, ids.filter((other) => other !== id).map((other) => s.players[other]));
     }
   } else {
     return; // 不再续约，定时器停止
@@ -535,7 +648,7 @@ function tick(ctx) {
 
 function spawnOrder(ctx) {
   const s = ctx.state;
-  const pool = MAPS[s.mapId].pool;
+  const pool = MAPS[s.mapId].recipePool;
   const candidates = pool.map((id) => RECIPES.find((r) => r.id === id)).filter(Boolean);
   const weighted = candidates.map((r) => ({ r, w: r.difficulty > s.difficultyLevel ? 1 : r.weight + r.difficulty * Math.max(0, s.difficultyLevel - 1) * 2 }));
   const totalWeight = weighted.reduce((sum, x) => sum + x.w, 0);
@@ -573,12 +686,25 @@ function takeNextMap(ctx) {
   return s.mapQueue.shift();
 }
 
-function resetPlayerForLayout(p, sp) {
-  p.x = sp.x + 0.5; p.z = sp.z + 0.5;
+function resetPlayerForLayout(p, sp, layout = null, runtime = null) {
+  const point = layout ? worldPoint(layout,runtime,sp) : sp;
+  p.x = point.x; p.z = point.z; p.supportId = sp.supportId || null;
+  if(Number.isInteger(sp.slot))p.roundSpawnSlot=sp.slot;
   p.input = { dx: 0, dz: 0 }; p.vx = 0; p.vz = 0; p.moveSeq = 0;
   p.face = { dx: 0, dz: 1 }; p.carrying = null; p.working = false;
+  p.charge = null; p.fall = null; p.respawnGrace = 0; p.interactSeq = 0; p.workSeq = 0;
   p.activeBuff = null;
   p.roundContributionScore = 0; p.roundServed = 0; p.roundPublicEvents = 0; p.roundStats = emptyStats();
+}
+
+function spawnForPlayer(s,p,playerId='') {
+  const used=new Set(Object.entries(s.players).filter(([id,other])=>id!==playerId&&Number.isInteger(other.roundSpawnSlot)).map(([,other])=>other.roundSpawnSlot));
+  return s.layout.spawns.find((spawn)=>spawn.slot===p.roundSpawnSlot)||s.layout.spawns.find((spawn)=>!used.has(spawn.slot))||s.layout.spawns[0];
+}
+function respawnAtRoundSpawn(s,p,playerId) {
+  const spawn=spawnForPlayer(s,p,playerId);if(!spawn)return;
+  p.roundSpawnSlot=spawn.slot;const point=worldPoint(s.layout,runtimeOf(s),spawn);
+  p.x=point.x;p.z=point.z;p.supportId=spawn.supportId||null;p.input={dx:0,dz:0};p.vx=0;p.vz=0;p.working=false;p.charge=null;p.fall=null;p.respawnGrace=RESPAWN_GRACE;
 }
 
 function teamComment(s, summary, final = false) {
@@ -624,7 +750,7 @@ function makePlayerTitles(entries, round, seed) {
   for (let rankIndex = 0; rankIndex < sorted.length; rankIndex++) {
     const p = sorted[rankIndex]; const stats = round ? (p.roundStats || emptyStats()) : (p.stats || emptyStats());
     const candidates = [];
-    const specialPriority = { clutchServes: 5, burnClears: 5, fastServes: 4, teamwork: 3, backstage: 3, allrounder: 3, noWaste: 2, clutch: 4, improving: 4, champion: 1 };
+    const specialPriority = { clutchServes: 5, burnClears: 5, fastServes: 4, throws:4, catches:5, conveyorTransfers:4, teamwork: 3, backstage: 3, allrounder: 3, noWaste: 2, clutch: 4, improving: 4, champion: 1 };
     const add = (kind, value, min, reason) => { if (value >= min && value === maxima[kind]) candidates.push({ kind, value, reason, priority: specialPriority[kind] || 4 }); };
     add('clutchServes', stats.clutchServes, 1, `${stats.clutchServes} 次压线上菜`);
     add('burnClears', stats.burnClears, 1, `${stats.burnClears} 次清理焦锅`);
@@ -634,6 +760,9 @@ function makePlayerTitles(entries, round, seed) {
     add('assembles', stats.assembles, 3, `完成 ${stats.assembles} 次装盘`);
     add('potAdds', stats.potAdds, 3, `${stats.potAdds} 次精准下锅`);
     add('deliveries', stats.deliveries, 2, `送出 ${stats.deliveries} 道菜`);
+    add('throws', stats.throws, 3, `${stats.throws} 次精准投掷`);
+    add('catches', stats.catches, 2, `${stats.catches} 次空中接取`);
+    add('conveyorTransfers', stats.conveyorTransfers, 3, `${stats.conveyorTransfers} 次物流转运`);
     const teamwork = playerMetric(p, 'teamwork', round);
     if (teamwork >= 3 && teamwork === maxima.teamwork) candidates.push({ kind: 'teamwork', value: teamwork, reason: `${teamwork} 次关键协作`, priority: specialPriority.teamwork });
     const basics = stats.chops + stats.washes + stats.assembles + stats.potAdds + stats.potPickups;
@@ -674,14 +803,21 @@ function setupRound(ctx) {
   s.nextMapId = null;
   s.gameSeq = (s.gameSeq || 0) + 1;
   const map = MAPS[s.mapId];
-  const layout = parseMap(s.mapId);
+  const layout = cloneLayout(map);
   s.layout = layout;
   s.stations = {};
-  for (const k in layout.stationAt) {
-    const st = layout.stationAt[k];
-    if (st.type === 'counter' || st.type === 'board') s.stations[k] = { item: null };
-    else if (st.type === 'stove') s.stations[k] = { contents: [], credits: [], phase: 'idle', t: 0, masterChef: false };
+  for (const station of layout.stations) {
+    if (station.type === 'counter' || station.type === 'board' || station.type === 'conveyorPort') s.stations[station.id] = { item: null };
+    else if (station.type === 'stove') s.stations[station.id] = { contents: [], credits: [], phase: 'idle', t: 0, masterChef: false };
+    else s.stations[station.id] = {};
   }
+  s.platforms = {};
+  for (const platform of layout.platforms) s.platforms[platform.id] = {x:0,z:0,previousX:0,previousZ:0};
+  s.mechanisms = {};
+  for (const mechanism of layout.mechanisms) s.mechanisms[mechanism.id] = createMechanismState(mechanism,ctx);
+  s.worldItems = {};
+  s.worldItemSeq = 0;
+  s.elapsed = 0;
   s.roundScore = 0;
   s.roundServed = 0;
   s.roundExpired = 0;
@@ -690,22 +826,18 @@ function setupRound(ctx) {
   s.roundTitles = {};
   s.orders = [];
   s.orderSeq = 0;
-  s.plates = { clean: map.plates, dirty: 0, washT: 0, due: [], cleanCredits: [] };
+  s.plates = { clean: map.plateCount, dirty: 0, washT: 0, due: [], cleanCredits: [] };
   s.timeLeft = GAME_TIME;
   s.nextOrderIn = ORDER_FIRST;
   s.groundBuff = null;
   s.nextBuffIn = 25;
   s.fireOverdriveRemaining = 0;
-  s.spaceEvent = { nextIn: map.mechanic?.type === 'floating_food' ? map.mechanic.interval : 0, warning: null };
-  s.gate = map.mechanic?.type === 'gate' ? { active: 'top', remaining: map.mechanic.switchTime, warning: false } : null;
-  if (s.gate) {
-    const closed = map.mechanic.gates.find((gate) => gate.id !== s.gate.active);
-    layout.dynamicBlocked[closed.x + ',' + closed.z] = true;
-  }
   const ids = Object.keys(s.players);
+  const runtime={platforms:s.platforms,mechanisms:s.mechanisms};
   for (let i = 0; i < ids.length; i++) {
     const p = s.players[ids[i]];
-    resetPlayerForLayout(p, layout.spawns[i % layout.spawns.length]);
+    resetPlayerForLayout(p, layout.spawns[i % layout.spawns.length],layout,runtime);
+    syncPlayerRecord(s,ids[i]);
   }
   s.phase = 'countdown';
   s.countdown = COUNTDOWN_T;
@@ -715,8 +847,7 @@ function setupRound(ctx) {
 
 function setupSession(ctx) {
   const s = ctx.state;
-  const legacyMap = s.legacySingle ? s.mapId : null;
-  s.roundIndex = 0; s.difficultyLevel = 1; s.mapQueue = shuffleMaps(ctx, null); s.mapId = null; s.nextMapId = legacyMap;
+  s.roundIndex = 0; s.difficultyLevel = 1; s.mapQueue = shuffleMaps(ctx, null); s.mapId = null; s.nextMapId = null;
   s.sessionScore = 0; s.score = 0; s.served = 0; s.expired = 0; s.rage = 0; s.standings = [];
   s.burns = 0; s.roundBurns = 0; s.roundHistory = []; s.roundComment = null; s.finalComment = null; s.roundTitles = {}; s.finalTitles = {};
   s.playerRecords = {};
@@ -736,7 +867,7 @@ function buildStandings(s) {
 
 function syncPlayerRecord(s, id) {
   const p = s.players[id]; if (!p) return;
-  s.playerRecords[id] = { name: p.name, color: p.color, contributionScore: p.contributionScore, servedCount: p.servedCount, publicEvents: p.publicEvents, joinOrder: p.joinOrder, stats: normalizeStats(p.stats) };
+  s.playerRecords[id] = { name: p.name, color: p.color, contributionScore: p.contributionScore, servedCount: p.servedCount, publicEvents: p.publicEvents, joinOrder: p.joinOrder, stats: normalizeStats(p.stats), roundSpawnSlot:p.roundSpawnSlot, roundSpawnGameSeq:s.gameSeq, roundSpawnMapId:s.mapId };
 }
 
 function finishSession(ctx) {
@@ -747,7 +878,7 @@ function finishSession(ctx) {
   const finalSummary = { score: s.sessionScore || 0, served: s.served || 0, expired: s.expired || 0, burns: s.burns || 0 };
   s.finalComment = teamComment(s, finalSummary, true);
   s.finalTitles = makePlayerTitles(s.standings, false, `${s.gameSeq}:final`);
-  s.phase = 'awards'; s.layout = makeAwardsLayout(); s.stations = {}; s.orders = [];
+  s.phase = 'awards'; s.layout = makeAwardsLayout(); s.stations = {}; s.platforms={}; s.mechanisms={}; s.worldItems={}; s.orders = [];
   s.gameSeq += 1;
   const ids = Object.keys(s.players);
   const spots = [{x:7,z:3},{x:5,z:4},{x:9,z:4},{x:7,z:6}];
@@ -757,14 +888,12 @@ function finishSession(ctx) {
 }
 
 function makeAwardsLayout() {
-  const grid = ['###############','#.............#','#.............#','#.............#','#.............#','#.............#','#.............#','#.............#','###############'];
-  return { mapId: 'awards', name: '颁奖广场', w: 15, h: 9, cells: grid.join('').split(''), spawns: [{x:7,z:3},{x:5,z:4},{x:9,z:4},{x:7,z:6}], stationAt: {} };
+  return {mapId:'awards',name:'颁奖广场',bounds:{w:15,h:9},terrain:terrain(15,9,(x,z)=>x>=1&&x<=13&&z>=1&&z<=7,()=>false,' '),platforms:[],stations:[],mechanisms:[],checkpoints:[{id:'awards',x:7,z:4}],spawns:[{slot:1,x:7,z:3},{slot:2,x:5,z:4},{slot:3,x:9,z:4},{slot:4,x:7,z:6}],camera:{minPixelsPerTile:44}};
 }
 
 function finishRound(ctx) {
   const s = ctx.state;
   captureRoundResult(s);
-  if (s.legacySingle) return finishSession(ctx);
   if (s.mode === 'party' && s.roundIndex >= 3) return finishSession(ctx);
   s.nextMapId = takeNextMap(ctx); s.roundResultTime = ROUND_RESULT_T; s.phase = 'roundResult';
   s.orders = [];
@@ -780,11 +909,13 @@ function weightedBuff(ctx) {
 
 function spawnGroundBuff(ctx) {
   const s = ctx.state; const L = s.layout; const candidates = [];
-  for (let z = 1; z < L.h - 1; z++) for (let x = 1; x < L.w - 1; x++) {
-    if (isBlocked(L, x, z)) continue;
-    if (L.spawns.some((sp) => Math.hypot(x - sp.x, z - sp.z) < 1.5)) continue;
+  const runtime={platforms:s.platforms,mechanisms:s.mechanisms};
+  for (let z = 1; z < L.bounds.h - 1; z++) for (let x = 1; x < L.bounds.w - 1; x++) {
+    if (!['.','i'].includes(terrainAt(L,runtime,x+0.5,z+0.5).kind)) continue;
+    if (blockingRects(L,runtime).some((r)=>x+0.5>=r.x&&x+0.5<=r.x+r.w&&z+0.5>=r.z&&z+0.5<=r.z+r.h)) continue;
+    if (L.spawns.some((sp) => {const wp=worldPoint(L,runtime,sp);return Math.hypot(x+0.5-wp.x,z+0.5-wp.z)<1.5;})) continue;
     if (Object.values(s.players).some((p) => Math.hypot(x + 0.5 - p.x, z + 0.5 - p.z) < 2)) continue;
-    const exits = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dz]) => !isBlocked(L, x + dx, z + dz)).length;
+    const exits = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dz]) => ['.','i'].includes(terrainAt(L,runtime,x+dx+0.5,z+dz+0.5).kind)).length;
     if (exits < 2) continue;
     candidates.push({ x: x + 0.5, z: z + 0.5 });
   }
@@ -816,42 +947,153 @@ function stepBuffs(ctx) {
   }
 }
 
-function stepMapMechanic(ctx) {
-  const s = ctx.state; const mechanic = s.layout.mechanic;
-  if (!mechanic) return;
-  if (mechanic.type === 'floating_food') {
-    if (s.spaceEvent.warning) {
-      s.spaceEvent.warning.remaining -= DT;
-      const key = s.spaceEvent.warning.key; const dyn = s.stations[key];
-      if (!dyn || !dyn.item || dyn.item !== s.spaceEvent.warning.item) s.spaceEvent.warning = null;
-      else if (s.spaceEvent.warning.remaining <= 0) {
-        const empty = Object.keys(s.layout.stationAt).filter((k) => s.layout.stationAt[k].type === 'counter' && k !== key && s.stations[k] && !s.stations[k].item);
-        if (empty.length) { const dest = empty[Math.floor(ctx.random() * empty.length)]; s.stations[dest].item = dyn.item; dyn.item = null; ctx.broadcast('space:teleport', {}); }
-        s.spaceEvent.warning = null;
-      }
-    } else {
-      s.spaceEvent.nextIn -= DT;
-      if (s.spaceEvent.nextIn <= 0) {
-        const eligible = Object.keys(s.layout.stationAt).filter((k) => s.layout.stationAt[k].type === 'counter' && s.stations[k]?.item && ['raw','chopped'].includes(s.stations[k].item.k));
-        if (eligible.length) { const key = eligible[Math.floor(ctx.random() * eligible.length)]; s.spaceEvent.warning = { key, remaining: mechanic.warning, item: s.stations[key].item }; ctx.broadcast('space:warning', { key }); }
-        s.spaceEvent.nextIn = mechanic.interval;
-      }
+function createMechanismState(def,ctx) {
+  return MECHANISM_REGISTRY[def.type]?.create(def,ctx) || {type:def.type};
+}
+function runtimeOf(s) { return {platforms:s.platforms,mechanisms:s.mechanisms}; }
+function itemHasPlate(content) { return content && (content.k === 'plate' || content.k === 'dish'); }
+function recycleContent(s, content) {
+  if (!itemHasPlate(content)) return;
+  if (content.k === 'plate' && (!content.items || content.items.length === 0)) s.plates.clean += 1;
+  else s.plates.due.push(DIRTY_DELAY);
+}
+function removeWorldItem(s, id, recycle = true) {
+  const entity=s.worldItems[id]; if (!entity) return;
+  if (recycle) recycleContent(s,entity.content);
+  delete s.worldItems[id];
+}
+function ensureWorldLimit(s) {
+  const entries=Object.values(s.worldItems);
+  if (entries.length < WORLD_ITEM_LIMIT) return true;
+  const victim=entries.filter((entry)=>entry.mode!=='airborne').sort((a,b)=>a.createdAt-b.createdAt)[0];
+  if (victim) {removeWorldItem(s,victim.id,true);return true;}
+  return false;
+}
+function createWorldItem(s, content, position, mode='ground', extra={}) {
+  if(!ensureWorldLimit(s))return null;
+  const id=`wi${++s.worldItemSeq}`;
+  s.worldItems[id]={id,content,mode,x:position.x,z:position.z,supportId:position.supportId||null,createdAt:s.elapsed,expiresAt:s.elapsed+WORLD_ITEM_LIFETIME,...extra};
+  return s.worldItems[id];
+}
+function pathMetrics(points) {
+  const segments=[]; let total=0;
+  for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],length=Math.hypot(b.x-a.x,b.z-a.z);segments.push({a,b,length,start:total});total+=length;}
+  return {segments,total};
+}
+function distanceOnPath(points,point) {
+  const metrics=pathMetrics(points);let best=null;
+  for(const seg of metrics.segments){const vx=seg.b.x-seg.a.x,vz=seg.b.z-seg.a.z,len2=vx*vx+vz*vz,t=len2?Math.max(0,Math.min(1,((point.x-seg.a.x)*vx+(point.z-seg.a.z)*vz)/len2)):0,px=seg.a.x+vx*t,pz=seg.a.z+vz*t,d=Math.hypot(point.x-px,point.z-pz),distance=seg.start+seg.length*t;if(!best||d<best.d)best={d,distance};}
+  return best?.distance||0;
+}
+function pointOnPath(points,distance) {
+  const metrics=pathMetrics(points); const d=Math.max(0,Math.min(metrics.total,distance));
+  const seg=metrics.segments.find((entry)=>d<=entry.start+entry.length)||metrics.segments[metrics.segments.length-1];
+  if(!seg)return points[0]||{x:0,z:0}; const t=seg.length?(d-seg.start)/seg.length:0;
+  return {x:seg.a.x+(seg.b.x-seg.a.x)*t,z:seg.a.z+(seg.b.z-seg.a.z)*t};
+}
+function startFall(ctx,id,p) {
+  if(p.fall||p.respawnGrace>0)return;
+  recycleContent(ctx.state,p.carrying); p.carrying=null; p.vx=p.vz=0;p.input={dx:0,dz:0};p.working=false;p.charge=null;p.fall={remaining:FALL_TIME};bumpStat(p,'falls');ctx.broadcast('player:fall',{id,name:p.name});
+}
+function stepPlatforms(s, platformIds) {
+  const runtime=runtimeOf(s);
+  for(const def of s.layout.platforms.filter((entry)=>platformIds.includes(entry.id))){
+    const state=s.platforms[def.id];state.previousX=state.x;state.previousZ=state.z;
+    if(def.motion){const angle=((s.elapsed/def.motion.period)+def.motion.phase)*Math.PI*2;const wave=Math.sin(angle)*def.motion.amplitude;state.x=def.motion.axis.x*wave;state.z=def.motion.axis.z*wave;}
+    const dx=state.x-state.previousX,dz=state.z-state.previousZ;
+    if(dx||dz){for(const p of Object.values(s.players))if(p.supportId===def.id&&!p.fall){p.x+=dx;p.z+=dz;}for(const item of Object.values(s.worldItems))if(item.supportId===def.id&&item.mode!=='airborne'){item.x+=dx;item.z+=dz;}}
+  }
+  for(const p of Object.values(s.players))if(!p.fall){const support=terrainAt(s.layout,runtime,p.x,p.z).supportId||null;p.supportId=support;}
+}
+function stepConveyor(ctx,def,state) {
+  const s=ctx.state,config=def.config,origin=config.supportId?platformOrigin(s.layout,runtimeOf(s),config.supportId):{x:0,z:0},points=config.path.points.map((point)=>({x:point.x+origin.x,z:point.z+origin.z})),metrics=pathMetrics(points);
+  if(config.reverseEvery){state.reverseIn-=DT;state.warning=state.reverseIn<=config.warning;if(state.reverseIn<=0){state.direction*=-1;state.reverseIn=config.reverseEvery;state.warning=false;ctx.broadcast('conveyor:reverse',{id:def.id,direction:state.direction});}}
+  const ports=s.layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.conveyorId===def.id).map((entry)=>({def:entry,state:s.stations[entry.id],distance:distanceOnPath(points,{x:entry.pathPoint.x+origin.x,z:entry.pathPoint.z+origin.z})}));
+  for(const port of ports.filter((entry)=>entry.def.portMode==='input'&&entry.state?.item)){
+    const occupied=Object.values(s.worldItems).some((item)=>item.mode==='conveyor'&&item.conveyorId===def.id&&Math.min(Math.abs(item.pathDistance-port.distance),config.path.loop?metrics.total-Math.abs(item.pathDistance-port.distance):Infinity)<.7);
+    if(occupied)continue;
+    const position=pointOnPath(points,port.distance),item=createWorldItem(s,port.state.item,{...position,supportId:config.supportId||null},'conveyor',{conveyorId:def.id,pathDistance:port.distance,lastOwnerId:port.state.lastOwnerId||''});
+    if(item){port.state.item=null;port.state.lastOwnerId=null;}
+  }
+  const items=Object.values(s.worldItems).filter((entry)=>entry.mode==='conveyor'&&entry.conveyorId===def.id).sort((a,b)=>state.direction*(b.pathDistance-a.pathDistance));
+  let ahead=null;
+  for(const item of items){const previous=item.pathDistance;let next=previous+state.direction*config.path.speed*DT;if(config.path.loop)next=(next%metrics.total+metrics.total)%metrics.total;else{if(ahead!==null)next=state.direction>0?Math.min(next,ahead-0.7):Math.max(next,ahead+0.7);next=Math.max(0,Math.min(metrics.total,next));}item.pathDistance=next;const pos=pointOnPath(points,next);item.x=pos.x;item.z=pos.z;item.supportId=config.supportId||null;ahead=next;
+    const travelled=state.direction>0?(config.path.loop?(next-previous+metrics.total)%metrics.total:next-previous):(config.path.loop?(previous-next+metrics.total)%metrics.total:previous-next);
+    const output=ports.filter((entry)=>entry.def.portMode==='output'&&entry.state&&!entry.state.item).map((entry)=>({entry,delta:state.direction>0?(config.path.loop?(entry.distance-previous+metrics.total)%metrics.total:entry.distance-previous):(config.path.loop?(previous-entry.distance+metrics.total)%metrics.total:previous-entry.distance)})).filter(({delta})=>delta>=-1e-6&&delta<=travelled+1e-6).sort((a,b)=>a.delta-b.delta)[0]?.entry;
+    if(output){output.state.item=item.content;delete s.worldItems[item.id];const owner=s.players[item.lastOwnerId];if(owner)bumpStat(owner,'conveyorTransfers');}
+  }
+}
+function shuffleGatePresets(ctx,ids,avoid=null) {
+  const bag=[...ids];
+  for(let index=bag.length-1;index>0;index--){const other=Math.floor(ctx.random()*(index+1));[bag[index],bag[other]]=[bag[other],bag[index]];}
+  if(bag.length>1&&bag[0]===avoid)[bag[0],bag[1]]=[bag[1],bag[0]];
+  return bag;
+}
+function gatePreset(def,id) { return def.config.presets.find((entry)=>entry.id===id); }
+function setGatePreview(state,nextOpenIds=[]) {
+  const next=new Set(nextOpenIds);
+  for(const gate of state.gates){gate.willOpen=!gate.open&&next.has(gate.id);gate.willClose=gate.open&&!next.has(gate.id);}
+}
+function takeGatePreset(ctx,def,state) {
+  if(!state.bag.length)state.bag=shuffleGatePresets(ctx,def.config.presets.map((entry)=>entry.id),state.activePresetId);
+  return state.bag.shift();
+}
+function createGateState(def,ctx) {
+  const presetIds=def.config.presets.map((entry)=>entry.id),bag=shuffleGatePresets(ctx,presetIds),activePresetId=bag.shift(),active=gatePreset(def,activePresetId),open=new Set(active.open);
+  return {type:def.type,remaining:def.config.switchEvery,warning:false,activePresetId,nextPresetId:null,bag,gates:def.config.groups.map((gate)=>({...gate,cells:gate.cells.map((cell)=>({...cell})),open:open.has(gate.id),willOpen:false,willClose:false}))};
+}
+function stepGate(ctx,def,state) {
+  state.remaining-=DT;
+  if(state.remaining<=def.config.warning&&!state.nextPresetId){
+    state.nextPresetId=takeGatePreset(ctx,def,state);
+    setGatePreview(state,gatePreset(def,state.nextPresetId).open);
+  }
+  state.warning=!!state.nextPresetId;
+  if(state.remaining>0)return;
+  const closing=state.gates.filter((gate)=>gate.willClose);
+  const occupied=Object.values(ctx.state.players).some((p)=>closing.some((gate)=>gate.cells.some((cell)=>Math.hypot(p.x-(cell.x+.5),p.z-(cell.z+.5))<.9)));
+  if(occupied){state.remaining=.5;return;}
+  const next=gatePreset(def,state.nextPresetId),open=new Set(next.open),previousOpen=state.gates.filter((gate)=>gate.open).map((gate)=>gate.id);
+  for(const gate of state.gates){gate.open=open.has(gate.id);gate.willOpen=false;gate.willClose=false;}
+  state.activePresetId=next.id;state.nextPresetId=null;state.remaining=def.config.switchEvery;state.warning=false;
+  ctx.broadcast('gate:switch',{presetId:next.id,label:next.label,open:[...next.open],closed:previousOpen.filter((id)=>!open.has(id))});
+}
+const noopMechanism=()=>{};
+const MECHANISM_REGISTRY={
+  movingPlatform:{create:(def)=>({type:def.type}),tick:(ctx,def)=>stepPlatforms(ctx.state,def.config.platformIds),getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+  conveyor:{create:(def)=>({type:def.type,direction:1,reverseIn:def.config.reverseEvery||0,warning:false}),tick:stepConveyor,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+  gate:{create:createGateState,tick:stepGate,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+  iceSurface:{create:(def)=>({type:def.type}),tick:noopMechanism,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+  waterHazard:{create:(def)=>({type:def.type}),tick:noopMechanism,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+};
+function stepMapMechanisms(ctx) {
+  const s=ctx.state;
+  for(const def of s.layout.mechanisms){const handler=MECHANISM_REGISTRY[def.type];handler?.tick(ctx,def,s.mechanisms[def.id]);}
+}
+function finishAirborne(ctx,item) {
+  const s=ctx.state,runtime=runtimeOf(s);
+  const receivers=Object.entries(s.players).filter(([id,p])=>id!==item.ownerId&&!p.carrying&&!p.fall&&!p.working).map(([id,p])=>({id,p,d:Math.hypot(p.x-item.x,p.z-item.z)})).filter((entry)=>entry.d<0.55&&entry.p.face.dx*(item.x-entry.p.x)+entry.p.face.dz*(item.z-entry.p.z)>0).sort((a,b)=>a.d-b.d);
+  if(receivers.length){const receiver=receivers[0];receiver.p.carrying=item.content;bumpStat(receiver.p,'catches');delete s.worldItems[item.id];ctx.broadcast('item:caught',{by:receiver.p.name});return;}
+  let landing=null;
+  for(const stationDef of s.layout.stations.filter((entry)=>entry.type==='counter'||entry.type==='board')){const pos=stationWorld(s.layout,runtime,stationDef);const dyn=s.stations[stationDef.id];if(Math.hypot(item.x-(pos.x+0.5),item.z-(pos.z+0.5))<0.7&&dyn&&!dyn.item){if(stationDef.type==='board'&&(!(item.content.k==='raw'||item.content.k==='chopped')||(item.content.k==='raw'&&!INGREDIENTS[item.content.g]?.choppable)))continue;landing={stationDef,dyn};break;}}
+  if(landing){landing.dyn.item=item.content;delete s.worldItems[item.id];return;}
+  const dx=item.motion?item.motion.toX-item.motion.fromX:0,dz=item.motion?item.motion.toZ-item.motion.fromZ:0,length=Math.hypot(dx,dz)||1;
+  const candidates=[0,.55,1,1.45].map((offset)=>({x:item.x-dx/length*offset,z:item.z-dz/length*offset}));
+  const safe=candidates.map((position)=>safeLooseItemPosition(s,position)).find(Boolean);
+  if(safe){item.mode='ground';item.x=safe.x;item.z=safe.z;item.supportId=safe.supportId||null;item.expiresAt=s.elapsed+WORLD_ITEM_LIFETIME;delete item.motion;return;}
+  removeWorldItem(s,item.id,true);ctx.broadcast('item:lost',{});
+}
+function stepWorldItems(ctx) {
+  const s=ctx.state;
+  for(const item of Object.values(s.worldItems)){
+    if(item.mode==='airborne'){
+      const previous={x:item.x,z:item.z};item.motion.elapsed+=DT;const t=Math.min(1,item.motion.elapsed/item.motion.duration);item.x=item.motion.fromX+(item.motion.toX-item.motion.fromX)*t;item.z=item.motion.fromZ+(item.motion.toZ-item.motion.fromZ)*t;
+      const receiver=Object.entries(s.players).filter(([id,p])=>id!==item.ownerId&&!p.carrying&&!p.fall&&!p.working).find(([,p])=>Math.hypot(p.x-item.x,p.z-item.z)<0.55&&p.face.dx*(item.x-p.x)+p.face.dz*(item.z-p.z)>0);
+      if(receiver){receiver[1].carrying=item.content;bumpStat(receiver[1],'catches');delete s.worldItems[item.id];ctx.broadcast('item:caught',{by:receiver[1].name});continue;}
+      const blocked=projectileBlockingRects(s.layout,runtimeOf(s)).some((rect)=>segmentHitsRect(previous,item,rect));
+      if(blocked){item.x=previous.x;item.z=previous.z;finishAirborne(ctx,item);}else if(t>=1)finishAirborne(ctx,item);
     }
-  } else if (mechanic.type === 'gate') {
-    const gate = s.gate; gate.remaining -= DT;
-    gate.warning = gate.remaining <= mechanic.warning;
-    if (gate.remaining <= 0) {
-      const closing = mechanic.gates.find((entry) => entry.id === gate.active);
-      const occupied = Object.values(s.players).some((p) => Math.hypot(p.x - (closing.x + 0.5), p.z - (closing.z + 0.5)) < 0.9);
-      if (occupied) gate.remaining = 0.5;
-      else {
-        const opening = mechanic.gates.find((entry) => entry.id !== gate.active);
-        s.layout.dynamicBlocked[closing.x + ',' + closing.z] = true;
-        delete s.layout.dynamicBlocked[opening.x + ',' + opening.z];
-        gate.active = opening.id; gate.remaining = mechanic.switchTime; gate.warning = false;
-        ctx.broadcast('gate:switch', { open: opening.id, closed: closing.id });
-      }
-    }
+    else if(s.elapsed>=item.expiresAt)removeWorldItem(s,item.id,true);
   }
 }
 
@@ -859,17 +1101,23 @@ function stepGame(ctx) {
   const s = ctx.state;
   const L = s.layout;
   const playerIds = Object.keys(s.players);
+  s.elapsed += DT;
   stepBuffs(ctx);
-  stepMapMechanic(ctx);
+  stepMapMechanisms(ctx);
+  stepWorldItems(ctx);
+  const runtime=runtimeOf(s);
 
   // --- 玩家：工作（切菜/洗碗）与移动 ---
   for (const id of playerIds) {
     const p = s.players[id];
+    if(p.respawnGrace>0)p.respawnGrace=Math.max(0,p.respawnGrace-DT);
+    if(p.charge){p.charge.held+=DT;if(p.charge.held>=THROW_TIMEOUT)p.charge=null;}
+    if(p.fall){p.fall.remaining-=DT;if(p.fall.remaining<=0)respawnAtRoundSpawn(s,p,id);continue;}
     if (p.working) {
-      const st = targetStation(L, p);
+      const st = targetStation(L, runtime, p);
       let didWork = false;
       if (st && st.type === 'board') {
-        const dyn = s.stations[st.x + ',' + st.z];
+        const dyn = s.stations[st.id];
         if (dyn && dyn.item && dyn.item.k === 'raw' && INGREDIENTS[dyn.item.g]?.choppable) {
           const rate = p.activeBuff && p.activeBuff.type === 'fast_hands' ? 1.5 : 1;
           dyn.item.progress = (dyn.item.progress || 0) + DT * rate;
@@ -908,7 +1156,9 @@ function stepGame(ctx) {
     }
     // 非零输入立即响应；零输入在 100ms 内沿原方向减速。
     const otherPlayers = playerIds.filter((otherId) => otherId !== id).map((otherId) => s.players[otherId]);
-    stepPlayerMovement(L, p, p.input, DT, otherPlayers);
+    stepPlayerMovement(L, runtime, p, p.input, DT, otherPlayers);
+    const ground=terrainAt(L,runtime,p.x,p.z);
+    if(!['.','i'].includes(ground.kind))startFall(ctx,id,p);
   }
 
   // --- 灶台：烹饪 / 烧糊 ---
@@ -921,7 +1171,7 @@ function stepGame(ctx) {
       if (pot.t >= COOK_TIME) {
         pot.phase = 'ready';
         pot.t = 0;
-        const st = L.stationAt[k];
+        const st = L.stations.find((entry)=>entry.id===k);
         ctx.broadcast('pot:ready', { x: st.x, z: st.z });
       }
     } else if (pot.phase === 'ready') {
@@ -932,7 +1182,7 @@ function stepGame(ctx) {
         pot.masterChef = false;
         s.burns = (s.burns || 0) + 1;
         s.roundBurns = (s.roundBurns || 0) + 1;
-        const st = L.stationAt[k];
+        const st = L.stations.find((entry)=>entry.id===k);
         ctx.broadcast('pot:burnt', { x: st.x, z: st.z });
       }
     }
@@ -953,7 +1203,9 @@ function stepGame(ctx) {
   if (s.nextOrderIn <= 0 && s.orders.length < MAX_ORDERS) {
     spawnOrder(ctx);
     const pressure = Math.max(0.4, 1 - 0.15 * Math.max(0, s.difficultyLevel - 1));
-    s.nextOrderIn = Math.max(8, (ORDER_MIN_GAP + ctx.random() * ORDER_VAR_GAP) * pressure);
+    const players=Math.max(2,Math.min(4,Object.keys(s.players).length));
+    const playerMultiplier=players===4?0.72:players===3?0.85:1;
+    s.nextOrderIn = Math.max(8, (ORDER_MIN_GAP + ctx.random() * ORDER_VAR_GAP) * pressure * playerMultiplier);
   }
   for (let i = s.orders.length - 1; i >= 0; i--) {
     const o = s.orders[i];
@@ -1000,18 +1252,66 @@ function awardCredits(s, credits) {
 }
 
 // ---------------------------------------------------------------------------
-// 交互（E 键）：依目标站台与手持物分派
+// 交互：工位优先，其次世界物品与地面放置
 // ---------------------------------------------------------------------------
+function nearestGroundItem(s,p) {
+  const tx=p.x+p.face.dx*0.65,tz=p.z+p.face.dz*0.65;
+  return Object.values(s.worldItems).filter((item)=>item.mode==='ground').map((item)=>({item,d:Math.hypot(item.x-tx,item.z-tz)})).filter((entry)=>entry.d<=0.85).sort((a,b)=>a.d-b.d)[0]?.item||null;
+}
+function canUseStation(s,p,st) {
+  const c=p.carrying,dyn=s.stations[st.id];
+  if(st.type==='crate')return !c&&s.elapsed>=(p.nextCrateAt||0);
+  if(st.type==='counter'||st.type==='board'){
+    if(!c)return !!dyn?.item;
+    if(!dyn?.item)return st.type==='counter'||((c.k==='raw'||c.k==='chopped')&&(c.k!=='raw'||INGREDIENTS[c.g]?.choppable));
+    const on=dyn.item;return (c.k==='raw'||c.k==='chopped')&&validItemPrep(c)&&(on.k==='plate'||on.k==='dish')&&on.items.length<3;
+  }
+  if(st.type==='conveyorPort')return st.portMode==='input'?(!c?!!dyn?.item:!dyn?.item):(!c&&!!dyn?.item);
+  if(st.type==='stove'){
+    if(!dyn)return false;
+    if(c&&(c.k==='raw'||c.k==='chopped'))return validItemPrep(c)&&COOKABLE.has(c.g)&&(dyn.phase==='idle'||dyn.phase==='cooking')&&dyn.contents.length<3;
+    if(c?.k==='plate')return c.items.length===0&&dyn.phase==='ready';
+    return !c&&dyn.contents.length>0&&(dyn.phase==='idle'||dyn.phase==='burnt');
+  }
+  if(st.type==='plates')return !c&&s.plates.clean>0;
+  if(st.type==='window')return c?.k==='dish'&&s.orders.some((order)=>order.key===recipeKey(c.items));
+  if(st.type==='trash')return !!c;
+  return false;
+}
+function safeItemPosition(s,p,position) {
+  const terrain=terrainAt(s.layout,runtimeOf(s),position.x,position.z);
+  if(!['.','i'].includes(terrain.kind))return null;
+  if(blockingRects(s.layout,runtimeOf(s)).some((rect)=>position.x>=rect.x-.18&&position.x<=rect.x+rect.w+.18&&position.z>=rect.z-.18&&position.z<=rect.z+rect.h+.18))return null;
+  if(Object.values(s.worldItems).some((item)=>item.mode!=='airborne'&&Math.hypot(item.x-position.x,item.z-position.z)<.55))return null;
+  if(Object.values(s.players).some((other)=>other!==p&&Math.hypot(other.x-position.x,other.z-position.z)<.4))return null;
+  return {...position,supportId:terrain.supportId||null};
+}
+function safeLooseItemPosition(s,position) {
+  const terrain=terrainAt(s.layout,runtimeOf(s),position.x,position.z);
+  if(!['.','i'].includes(terrain.kind))return null;
+  if(blockingRects(s.layout,runtimeOf(s)).some((rect)=>position.x>=rect.x-.18&&position.x<=rect.x+rect.w+.18&&position.z>=rect.z-.18&&position.z<=rect.z+rect.h+.18))return null;
+  if(Object.values(s.worldItems).some((item)=>item.mode!=='airborne'&&Math.hypot(item.x-position.x,item.z-position.z)<.55))return null;
+  return {...position,supportId:terrain.supportId||null};
+}
+function dropCarrying(ctx,p) {
+  const s=ctx.state;const candidates=[{x:p.x+p.face.dx*0.8,z:p.z+p.face.dz*0.8},{x:p.x,z:p.z}];
+  for(const position of candidates){const safe=safeItemPosition(s,p,position);if(safe){const entity=createWorldItem(s,p.carrying,safe,'ground',{lastOwnerId:playerIdFor(s,p)});if(!entity)return false;p.carrying=null;return true;}}
+  return false;
+}
 function doInteract(ctx, p) {
   const s = ctx.state;
-  const st = targetStation(s.layout, p);
-  if (!st) return;
-  const key = st.x + ',' + st.z;
-  const dyn = s.stations[key];
+  const target = targetStation(s.layout, runtimeOf(s), p);
+  const st = target&&(canUseStation(s,p,target)||target.type==='conveyorPort')?target:null;
+  if (!st) {
+    if(!p.carrying){const item=nearestGroundItem(s,p);if(item){p.carrying=item.content;delete s.worldItems[item.id];bumpStat(p,'groundPickups');}}
+    else dropCarrying(ctx,p);
+    return;
+  }
+  const dyn = s.stations[st.id];
   const c = p.carrying;
 
   if (st.type === 'crate') {
-    if (!c) p.carrying = { k: 'raw', g: st.crate, progress: 0, credits: [credit(playerIdFor(s, p), 1, false)] };
+    if (!c && s.elapsed >= (p.nextCrateAt||0)) {p.carrying = { k: 'raw', g: st.crate, progress: 0, credits: [credit(playerIdFor(s, p), 1, false)] };p.nextCrateAt=s.elapsed+INTERACT_COOLDOWN;}
     return;
   }
 
@@ -1037,6 +1337,12 @@ function doInteract(ctx, p) {
         p.carrying = null;
       }
     }
+    return;
+  }
+
+  if(st.type==='conveyorPort'){
+    if(!c&&dyn?.item){p.carrying=dyn.item;dyn.item=null;dyn.lastOwnerId=null;if(p.carrying.k==='raw')p.carrying.progress=0;}
+    else if(c&&st.portMode==='input'&&dyn&&!dyn.item){if(c.k==='raw')c.progress=0;dyn.item=c;dyn.lastOwnerId=playerIdFor(s,p);p.carrying=null;}
     return;
   }
 
@@ -1122,10 +1428,19 @@ function doInteract(ctx, p) {
   }
 
   if (st.type === 'trash') {
-    if (c) { bumpStat(p, 'discards'); p.carrying = null; }
+    if (c) { bumpStat(p, 'discards'); recycleContent(s,c);p.carrying = null; }
     return;
   }
   // sink：洗碗走 work 长按，不在此处理
+}
+
+function throwCarrying(ctx,p,held) {
+  if(!p.carrying)return;
+  const charge=Math.max(0,Math.min(1,(held-THROW_THRESHOLD)/(THROW_FULL_TIME-THROW_THRESHOLD)));
+  const range=THROW_MIN_RANGE+(THROW_MAX_RANGE-THROW_MIN_RANGE)*charge;
+  const fromX=p.x+p.face.dx*0.45,fromZ=p.z+p.face.dz*0.45;
+  const entity=createWorldItem(ctx.state,p.carrying,{x:fromX,z:fromZ},'airborne',{ownerId:playerIdFor(ctx.state,p),lastOwnerId:playerIdFor(ctx.state,p),motion:{fromX,fromZ,toX:fromX+p.face.dx*range,toZ:fromZ+p.face.dz*range,elapsed:0,duration:0.45+range*0.07}});
+  if(!entity)return;p.carrying=null;bumpStat(p,'throws');ctx.broadcast('item:thrown',{id:entity.id,by:p.name,range});
 }
 
 function playerIdFor(s, player) {
@@ -1175,6 +1490,11 @@ export default defineRoom({
       players: {},
       layout: null,
       stations: {},
+      platforms: {},
+      mechanisms: {},
+      worldItems: {},
+      worldItemSeq: 0,
+      elapsed: 0,
       orders: [],
       nextOrderIn: 0,
       plates: { clean: 0, dirty: 0, washT: 0, due: [], cleanCredits: [] },
@@ -1182,8 +1502,6 @@ export default defineRoom({
       groundBuff: null,
       nextBuffIn: 25,
       fireOverdriveRemaining: 0,
-      spaceEvent: { nextIn: 0, warning: null },
-      gate: null,
     };
   },
 
@@ -1192,40 +1510,8 @@ export default defineRoom({
   },
 
   onRestore(ctx) {
-    // 房主刷新后从快照恢复：若对局仍在进行，重新挂上 tick 定时器
+    // 仅恢复当前全新模型产生的快照；不存在旧状态迁移路径。
     if (ctx.host) ctx.state.hostId = ctx.host.id;
-    const s = ctx.state;
-    if (!Array.isArray(s.roundHistory)) s.roundHistory = [];
-    if (!s.roundTitles) s.roundTitles = {};
-    if (!s.finalTitles) s.finalTitles = {};
-    if (!Number.isFinite(s.burns)) s.burns = 0;
-    if (!Number.isFinite(s.roundBurns)) s.roundBurns = 0;
-    if (!Number.isFinite(s.nextBuffIn)) s.nextBuffIn = 25;
-    if (!Number.isFinite(s.fireOverdriveRemaining)) s.fireOverdriveRemaining = 0;
-    if (!s.spaceEvent) s.spaceEvent = { nextIn: 0, warning: null };
-    if (s.layout) {
-      if (!s.layout.dynamicBlocked) s.layout.dynamicBlocked = {};
-      const map = MAPS[s.mapId];
-      if (!s.layout.movementProfile) s.layout.movementProfile = map?.movementProfile || null;
-      if (!s.layout.mechanic) s.layout.mechanic = map?.mechanic || null;
-      if (s.layout.mechanic?.type === 'gate') {
-        if (!s.gate || !['top', 'bottom'].includes(s.gate.active)) s.gate = { active: 'top', remaining: s.layout.mechanic.switchTime, warning: false };
-        for (const entry of s.layout.mechanic.gates) {
-          if (entry.id === s.gate.active) delete s.layout.dynamicBlocked[entry.x + ',' + entry.z];
-          else s.layout.dynamicBlocked[entry.x + ',' + entry.z] = true;
-        }
-      }
-    }
-    for (const pot of Object.values(s.stations || {})) if (pot.contents && typeof pot.masterChef !== 'boolean') pot.masterChef = false;
-    for (const id in ctx.state.players || {}) {
-      const p = ctx.state.players[id];
-      if (!Number.isFinite(p.vx)) p.vx = 0;
-      if (!Number.isFinite(p.vz)) p.vz = 0;
-      if (!Number.isSafeInteger(p.moveSeq)) p.moveSeq = 0;
-      if (!p.activeBuff || !BUFF_TYPES.includes(p.activeBuff.type) || !Number.isFinite(p.activeBuff.remaining)) p.activeBuff = null;
-      p.stats = normalizeStats(p.stats || ctx.state.playerRecords?.[id]?.stats);
-      p.roundStats = normalizeStats(p.roundStats);
-    }
     if (ctx.state.phase === 'playing' || ctx.state.phase === 'countdown' || ctx.state.phase === 'roundResult' || ctx.state.phase === 'awards') {
       armTick(ctx);
     }
@@ -1233,6 +1519,7 @@ export default defineRoom({
 
   onJoin(ctx, player) {
     const s = ctx.state;
+    const previousRecord=s.playerRecords[player.id];
     if (ctx.host && player.id === ctx.host.id) s.hostId = ctx.host.id;
     const count = Object.keys(s.players).length;
     s.joinSeq = (s.joinSeq || 0) + 1;
@@ -1248,23 +1535,32 @@ export default defineRoom({
       face: { dx: 0, dz: 1 },
       carrying: null,
       working: false,
+      supportId: null,
+      roundSpawnSlot: null,
+      charge: null,
+      fall: null,
+      respawnGrace: 0,
+      interactSeq: 0,
+      workSeq: 0,
       activeBuff: null,
-      contributionScore: s.playerRecords[player.id]?.contributionScore || 0,
+      contributionScore: previousRecord?.contributionScore || 0,
       roundContributionScore: 0,
-      servedCount: s.playerRecords[player.id]?.servedCount || 0,
-      publicEvents: s.playerRecords[player.id]?.publicEvents || 0,
+      servedCount: previousRecord?.servedCount || 0,
+      publicEvents: previousRecord?.publicEvents || 0,
       roundServed: 0,
       roundPublicEvents: 0,
-      stats: normalizeStats(s.playerRecords[player.id]?.stats),
+      stats: normalizeStats(previousRecord?.stats),
       roundStats: emptyStats(),
-      joinOrder: s.playerRecords[player.id]?.joinOrder || s.joinSeq,
+      joinOrder: previousRecord?.joinOrder || s.joinSeq,
     };
     s.players[player.id] = p;
     syncPlayerRecord(s, player.id);
     if ((s.phase === 'playing' || s.phase === 'countdown' || s.phase === 'awards') && s.layout) {
-      const sp = s.layout.spawns[count % s.layout.spawns.length];
-      p.x = sp.x + 0.5;
-      p.z = sp.z + 0.5;
+      const used=new Set(Object.entries(s.players).filter(([id])=>id!==player.id).map(([,other])=>other.roundSpawnSlot).filter(Number.isInteger));
+      const remembered=previousRecord?.roundSpawnGameSeq===s.gameSeq&&previousRecord?.roundSpawnMapId===s.mapId?previousRecord.roundSpawnSlot:null;
+      const sp=s.layout.spawns.find((entry)=>entry.slot===remembered&&!used.has(entry.slot))||s.layout.spawns.find((entry)=>!used.has(entry.slot))||s.layout.spawns[count%s.layout.spawns.length];
+      resetPlayerForLayout(p,sp,s.layout,runtimeOf(s));
+      syncPlayerRecord(s,player.id);
     }
     ctx.broadcast('player:joined', { name: p.name });
   },
@@ -1278,22 +1574,18 @@ export default defineRoom({
       s.phase = 'lobby';
       s.layout = null;
       s.stations = {};
+      s.platforms = {};
+      s.mechanisms = {};
+      s.worldItems = {};
       s.orders = [];
     }
   },
 
   actions: {
-    // 旧版客户兼容；新 manifest 不再公开此动作。
-    selectMap(ctx, { player, payload }) {
-      const s = ctx.state;
-      if (s.phase !== 'lobby' || player.id !== ctx.host.id || !payload || !MAPS[payload.mapId]) return;
-      s.mapId = payload.mapId; s.legacySingle = true;
-    },
-
     selectMode(ctx, { player, payload }) {
       const s = ctx.state;
       if (s.phase !== 'lobby' || player.id !== ctx.host.id) return;
-      if (payload && (payload.mode === 'party' || payload.mode === 'endless')) { s.mode = payload.mode; s.legacySingle = false; }
+      if (payload && (payload.mode === 'party' || payload.mode === 'endless')) s.mode = payload.mode;
     },
 
     // 大厅：开始游戏（仅房主，>=2 人）
@@ -1322,6 +1614,9 @@ export default defineRoom({
       s.phase = 'lobby';
       s.layout = null;
       s.stations = {};
+      s.platforms = {};
+      s.mechanisms = {};
+      s.worldItems = {};
       s.orders = [];
       for (const id in s.players) {
         const p = s.players[id];
@@ -1351,33 +1646,37 @@ export default defineRoom({
         dz /= len;
       }
       const seq = Number(payload && payload.seq);
-      if (Number.isSafeInteger(seq) && seq >= 0) {
-        const currentSeq = Number.isSafeInteger(p.moveSeq) ? p.moveSeq : 0;
-        if (seq < currentSeq) return; // 忽略乱序到达的旧方向
-        p.moveSeq = seq;
-      } else {
-        // Compatibility with older clients and restored snapshots.
-        p.moveSeq = (Number.isSafeInteger(p.moveSeq) ? p.moveSeq : 0) + 1;
-      }
+      if (!Number.isSafeInteger(seq) || seq <= p.moveSeq) return;
+      p.moveSeq = seq;
       p.input = { dx, dz };
     },
 
-    // 工作意图（切菜/洗碗，长按）：{ on: boolean }
+    // 工作意图（切菜/洗碗，长按）：{ active: boolean, seq: number }
     work(ctx, { player, payload }) {
       const s = ctx.state;
       if (s.phase !== 'playing') return;
       const p = s.players[player.id];
       if (!p) return;
-      p.working = !!(payload && payload.on);
+      const seq=Number(payload?.seq);if(!Number.isSafeInteger(seq)||seq<=p.workSeq)return;p.workSeq=seq;
+      p.working = !!payload.active;
     },
 
-    // 交互（拿/放/装盘/上菜/倒垃圾）
-    interact(ctx, { player }) {
+    // 全新按下/松开协议：短按互动，长按投掷。
+    interact(ctx, { player, payload }) {
       const s = ctx.state;
       if (s.phase !== 'playing') return;
       const p = s.players[player.id];
       if (!p || !s.layout) return;
-      doInteract(ctx, p);
+      const phase=payload?.phase,seq=Number(payload?.seq);if(!['start','release','cancel'].includes(phase)||!Number.isSafeInteger(seq))return;
+      if(phase==='start'){
+        if(seq<=p.interactSeq||s.elapsed<(p.nextInteractAt||0))return;p.interactSeq=seq;p.nextInteractAt=s.elapsed+INTERACT_COOLDOWN;
+        if(!p.carrying)doInteract(ctx,p);else p.charge={seq,held:0};
+        return;
+      }
+      if(!p.charge||p.charge.seq!==seq)return;
+      const held=p.charge.held;p.charge=null;
+      if(phase==='cancel')return;
+      if(held<=THROW_THRESHOLD+1e-6)doInteract(ctx,p);else throwCarrying(ctx,p,held);
     },
   },
 });
