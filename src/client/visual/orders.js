@@ -4,7 +4,7 @@ export function ingredientBadge(ingredients, id, prep = null) {
     color: ingredient ? '#' + ingredient.color.toString(16).padStart(6, '0') : '#999999',
     label: ingredient ? ingredient.name[0] : '?',
     name: ingredient ? ingredient.name : '未知食材',
-    prepLabel: prep === 'chopped' ? '刀' : (prep === 'whole' ? '整' : ''),
+    prep: prep === 'chopped' ? 'chopped' : 'whole',
   };
 }
 

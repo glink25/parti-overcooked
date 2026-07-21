@@ -13,9 +13,13 @@ const ingredients = {
 test('十种订单食材使用食材箱一致的单字提示', () => {
   assert.deepEqual(Object.keys(ingredients).map((id) => ingredientBadge(ingredients, id).label), ['番', '洋', '菌', '生', '黄', '胡', '土', '肉', '奶', '米']);
   assert.equal(ingredientBadge(ingredients, 'rice').color, '#f4efe4');
-  assert.deepEqual(ingredientBadge(ingredients, 'missing'), { color: '#999999', label: '?', name: '未知食材', prepLabel: '' });
-  assert.equal(ingredientBadge(ingredients, 'tomato', 'chopped').prepLabel, '刀');
-  assert.equal(ingredientBadge(ingredients, 'tomato', 'whole').prepLabel, '整');
+  assert.deepEqual(ingredientBadge(ingredients, 'missing'), { color: '#999999', label: '?', name: '未知食材', prep: 'whole' });
+  assert.equal(ingredientBadge(ingredients, 'tomato', 'chopped').prep, 'chopped');
+  assert.equal(ingredientBadge(ingredients, 'tomato', 'whole').prep, 'whole');
+});
+
+test('订单用完整圆和分割圆区分处理状态', () => {
+  assert.notEqual(ingredientBadge(ingredients, 'tomato', 'chopped').prep, ingredientBadge(ingredients, 'tomato', 'whole').prep);
 });
 
 test('盘子架在有盘与空盘时使用明确的蓝红状态', () => {

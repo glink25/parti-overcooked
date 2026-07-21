@@ -12,7 +12,9 @@ import { animateChefModel, kickChef, makeChefModel } from './visual/chef.js';
 import { createEnvironmentController } from './visual/environment.js';
 import { createEffectSystem } from './visual/effects.js';
 import { createMaterialSystem } from './visual/materials.js';
+import { ingredientVisual } from './visual/ingredients.js';
 import { ingredientBadge, plateStationState } from './visual/orders.js';
+import { clampJoystickCenter, joystickVector, shortActionLabel } from './visual/touch-controls.js';
 import { computeRenderPixelRatio, detectQualityTier, qualitySettings, themeFor } from './visual/themes.js';
 
 // ---------------------------------------------------------------------------
@@ -142,7 +144,7 @@ const el = {
   roundResult: $('round-result'), roundTitle: $('round-title'), roundComment: $('round-comment'), roundBoard: $('round-board'), roundNext: $('round-next'),
   awardsHud: $('awards-hud'), awardBoard: $('award-board'), awardTotal: $('award-total'), finalComment: $('final-comment'), awardsActions: $('awards-actions'),
   awardRematchBtn: $('award-rematch-btn'), awardLobbyBtn: $('award-lobby-btn'),
-  touchUi: $('touch-ui'), joy: $('joy'), joyKnob: $('joy-knob'),
+  touchUi: $('touch-ui'), touchZone: $('touch-zone'), joy: $('joy'), joyKnob: $('joy-knob'),
   btnInteract: $('btn-interact'), btnWork: $('btn-work'),
   audioToggle: $('audio-toggle'),
   bubble: $('bubble'), bubbleE: $('bubble-e'), bubbleQ: $('bubble-q'), bubbleInfo: $('bubble-info'),
@@ -275,12 +277,56 @@ window.addEventListener('beforeunload', () => {
 function makeIngredientMesh(g, chopped) {
   const grp = new THREE.Group();
   const c = ING[g] ? ING[g].color : 0xffffff;
+  const accent = ingredientVisual(g).accent;
   if (chopped) {
-    for (let i = 0; i < 3; i++) {
-      const p = box(0.11, 0.09, 0.11, c);
-      p.position.set((i - 1) * 0.13, 0.05, (i % 2) * 0.1 - 0.05);
-      p.rotation.y = i * 0.7;
-      grp.add(p);
+    switch (g) {
+      case 'tomato':
+        for (let i = 0; i < 3; i++) {
+          const wedge = new THREE.Mesh(new THREE.SphereGeometry(0.105, 7, 5, 0, Math.PI * 0.72), mat(c));
+          wedge.scale.y = 0.55; wedge.position.set((i - 1) * 0.12, 0.065, (i % 2) * 0.07 - 0.03); wedge.rotation.y = i * 1.9; wedge.castShadow = true; grp.add(wedge);
+        }
+        break;
+      case 'onion':
+        for (let i = 0; i < 3; i++) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07 + i * 0.008, 0.018, 5, 12), mat(i === 1 ? accent : c));
+          ring.rotation.x = Math.PI / 2; ring.position.set((i - 1) * 0.1, 0.025 + i * 0.015, (i % 2) * 0.06); ring.castShadow = true; grp.add(ring);
+        }
+        break;
+      case 'mushroom':
+        for (let i = 0; i < 3; i++) {
+          const slice = sph(0.1, c, 8, 5); slice.scale.set(1, 0.28, 0.58); slice.position.set((i - 1) * 0.11, 0.04, (i % 2) * 0.08); slice.rotation.y = i * 0.5; grp.add(slice);
+          const stem = box(0.04, 0.045, 0.045, accent); stem.position.copy(slice.position).add(new THREE.Vector3(0, 0.02, 0)); grp.add(stem);
+        }
+        break;
+      case 'lettuce':
+        for (let i = 0; i < 4; i++) {
+          const leaf = new THREE.Mesh(new THREE.CircleGeometry(0.09, 6), mat(i % 2 ? accent : c)); leaf.rotation.set(-Math.PI / 2 + (i - 1.5) * 0.14, 0, i * 0.8); leaf.position.set((i - 1.5) * 0.07, 0.035 + (i % 2) * 0.025, (i % 2) * 0.07); leaf.castShadow = true; grp.add(leaf);
+        }
+        break;
+      case 'cucumber':
+        for (let i = 0; i < 3; i++) {
+          const slice = cyl(0.082, 0.082, 0.035, c, 12); slice.position.set((i - 1) * 0.11, 0.025 + i * 0.012, (i % 2) * 0.05); slice.rotation.y = i * 0.25; grp.add(slice);
+          const core = cyl(0.045, 0.045, 0.038, accent, 10); core.position.copy(slice.position); core.rotation.copy(slice.rotation); grp.add(core);
+        }
+        break;
+      case 'carrot':
+        for (let i = 0; i < 4; i++) { const coin = cyl(0.07, 0.07, 0.055, c, 9); coin.position.set((i - 1.5) * 0.085, 0.035 + (i % 2) * 0.025, (i % 2) * 0.055); coin.rotation.y = i * 0.35; grp.add(coin); }
+        break;
+      case 'potato':
+        for (let i = 0; i < 3; i++) { const cube = box(0.11, 0.09, 0.11, i === 1 ? accent : c); cube.position.set((i - 1) * 0.12, 0.05, (i % 2) * 0.08); cube.rotation.y = i * 0.45; grp.add(cube); }
+        break;
+      case 'meat':
+        for (let i = 0; i < 3; i++) { const cube = box(0.115, 0.085, 0.1, c); cube.position.set((i - 1) * 0.12, 0.05, (i % 2) * 0.08); cube.rotation.y = i * 0.55; grp.add(cube); const fat = box(0.08, 0.012, 0.04, accent); fat.position.copy(cube.position).add(new THREE.Vector3(0, 0.05, 0)); fat.rotation.y = cube.rotation.y + 0.4; grp.add(fat); }
+        break;
+      case 'cheese':
+        for (let i = 0; i < 3; i++) { const cube = box(0.105, 0.1, 0.105, c); cube.position.set((i - 1) * 0.115, 0.055, (i % 2) * 0.075); cube.rotation.y = i * 0.35; grp.add(cube); const hole = sph(0.022, accent, 6, 4); hole.position.copy(cube.position).add(new THREE.Vector3(0.035, 0.055, 0.035)); grp.add(hole); }
+        break;
+      case 'rice':
+        for (let i = 0; i < 5; i++) { const grain = sph(0.052, c, 7, 4); grain.scale.set(1.5, 0.52, 0.62); grain.rotation.y = i * 1.1; grain.position.set((i - 2) * 0.07, 0.035 + (i % 2) * 0.035, (i % 3 - 1) * 0.055); grp.add(grain); }
+        break;
+      default: {
+        const p = box(0.12, 0.09, 0.12, c); p.position.y = 0.05; grp.add(p);
+      }
     }
     return grp;
   }
@@ -342,6 +388,22 @@ function makeIngredientMesh(g, chopped) {
       m.scale.set(1.2, 0.85, 0.95);
       m.position.y = 0.12;
       grp.add(m);
+      for (const [x, y, z] of [[-.1,.15,.08],[.08,.19,.06],[.04,.1,-.12]]) { const eye = sph(0.018, accent, 5, 4); eye.position.set(x, y, z); grp.add(eye); }
+      break;
+    }
+    case 'meat': {
+      m = sph(0.15, c, 8, 6); m.scale.set(1.25, 0.45, 0.9); m.position.y = 0.09; m.rotation.y = -0.25; grp.add(m);
+      const fat = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 5, 10), mat(accent)); fat.rotation.x = Math.PI / 2; fat.scale.x = 1.25; fat.position.set(0.02, 0.145, 0.01); grp.add(fat);
+      break;
+    }
+    case 'cheese': {
+      m = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.22, 3), mat(c)); m.castShadow = true; m.rotation.set(0, 0.35, Math.PI / 2); m.position.y = 0.12; grp.add(m);
+      for (const [x, y, z, s] of [[-.05,.17,.1,.027],[.07,.12,.09,.022],[.02,.2,-.06,.018]]) { const hole = sph(s, accent, 6, 4); hole.position.set(x, y, z); grp.add(hole); }
+      break;
+    }
+    case 'rice': {
+      m = sph(0.16, c, 10, 6); m.scale.set(1.2, 0.55, 1); m.position.y = 0.1; grp.add(m);
+      for (let i = 0; i < 5; i++) { const grain = sph(0.035, i % 2 ? c : accent, 6, 4); grain.scale.set(1.45, 0.42, 0.58); grain.rotation.y = i * 1.2; grain.position.set(Math.cos(i * 2.2) * 0.1, 0.14 + (i % 2) * 0.035, Math.sin(i * 2.2) * 0.07); grp.add(grain); }
       break;
     }
     default: {
@@ -361,12 +423,13 @@ function makePlateMesh(items) {
   grp.add(plate);
   if (items && items.length) {
     items.forEach((item, i) => {
-      const g = normalizedRequirement(item).ingredient;
-      const blob = sph(0.09, ING[g] ? ING[g].color : 0xcccccc, 8, 6);
-      blob.scale.y = 0.6;
+      const requirement = normalizedRequirement(item);
+      const food = makeIngredientMesh(requirement.ingredient, requirement.prep === 'chopped');
+      food.scale.setScalar(items.length >= 3 ? 0.48 : 0.56);
       const a = (i / items.length) * Math.PI * 2;
-      blob.position.set(Math.cos(a) * 0.09, 0.08, Math.sin(a) * 0.09);
-      grp.add(blob);
+      food.position.set(Math.cos(a) * 0.1, 0.055, Math.sin(a) * 0.1);
+      food.rotation.y = a + 0.5;
+      grp.add(food);
     });
   }
   return grp;
@@ -1205,7 +1268,7 @@ function stationHint(st, dyn, me, state) {
       }
       return { e: '倒掉', info: '组合不对，已无法成汤', warn: true };
     }
-    return { info: '按订单角标放入完整或切碎食材' };
+    return { info: '按订单完整圆/分割圆放入对应食材' };
   }
   if (st.type === 'plates') {
     if (c) return { info: '先放下手上的东西' };
@@ -1233,6 +1296,24 @@ function stationHint(st, dyn, me, state) {
 
 const bubbleVec = new THREE.Vector3();
 let bubbleLastKey = '';
+let touchActionKey = '';
+function updateTouchActions(hint) {
+  if (!IS_TOUCH) return;
+  const interactLabel = shortActionLabel(hint?.e, '互动');
+  const workLabel = shortActionLabel(hint?.q, '切/洗');
+  const key = `${interactLabel}|${workLabel}|${!!hint?.e}|${!!hint?.q}`;
+  if (key === touchActionKey) return;
+  touchActionKey = key;
+  el.btnInteract.textContent = interactLabel;
+  el.btnWork.textContent = workLabel;
+  el.btnInteract.setAttribute('aria-label', hint?.e || '互动，当前没有可执行操作');
+  el.btnWork.setAttribute('aria-label', hint?.q || '切菜或洗碗，当前没有可执行操作');
+  el.btnInteract.classList.toggle('available', !!hint?.e);
+  el.btnInteract.classList.toggle('unavailable', !hint?.e);
+  el.btnWork.classList.toggle('available', !!hint?.q);
+  el.btnWork.classList.toggle('unavailable', !hint?.q);
+}
+
 function updateBubble() {
   let target = null;
   if (latestState && latestState.phase === 'playing' && builtLayout) {
@@ -1252,6 +1333,7 @@ function updateBubble() {
     targetRing.visible = false;
     el.bubble.classList.add('hidden');
     bubbleLastKey = '';
+    updateTouchActions(null);
     return;
   }
 
@@ -1262,6 +1344,7 @@ function updateBubble() {
 
   // 气泡内容（仅在变化时写 DOM）
   const hint = stationHint(target.st, latestState.stations[target.key], target.me, latestState);
+  updateTouchActions(hint);
   const contentKey = hint ? `${hint.e}|${hint.q}|${hint.info}|${hint.warn}` : '';
   if (contentKey !== bubbleLastKey) {
     bubbleLastKey = contentKey;
@@ -1318,7 +1401,7 @@ function ingDotsHtml(items) {
     const requirement = normalizedRequirement(item);
     const badge = ingredientBadge(ING, requirement.ingredient, requirement.prep);
     const prepName = requirement.prep === 'chopped' ? '切碎' : '完整';
-    return `<i style="background:${badge.color}" aria-label="${prepName}${badge.name}">${badge.label}<b>${badge.prepLabel}</b></i>`;
+    return `<i class="${badge.prep}" style="--ingredient:${badge.color}" aria-label="${prepName}${badge.name}" title="${prepName}${badge.name}">${badge.label}</i>`;
   }).join('');
 }
 
@@ -1766,38 +1849,44 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 let joyPointerId = null;
 let joyVec = { dx: 0, dz: 0 };
 const JOY_R = 40;
+const JOY_VISUAL_R = 59;
+let joyCenter = { x: 0, y: 0 };
 
 function resetJoystick() {
   joyPointerId = null;
   joyVec = { dx: 0, dz: 0 };
   el.joyKnob.style.transform = 'translate(-50%,-50%)';
+  el.joy.classList.remove('active');
 }
 
 function updateJoystick(e) {
-  const rect = el.joy.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  let dx = e.clientX - cx;
-  let dy = e.clientY - cy;
-  const len = Math.hypot(dx, dy);
-  if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
-  el.joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  const mag = Math.min(1, len / JOY_R);
-  if (mag < 0.18) {
-    joyVec = { dx: 0, dz: 0 };
-  } else {
-    const n = Math.hypot(dx, dy) || 1;
-    joyVec = { dx: dx / n * mag, dz: dy / n * mag };
-  }
+  const next = joystickVector({ x: e.clientX, y: e.clientY }, joyCenter, JOY_R);
+  el.joyKnob.style.transform = `translate(calc(-50% + ${next.knobX}px), calc(-50% + ${next.knobY}px))`;
+  joyVec = { dx: next.dx, dz: next.dz };
 }
 
-el.joy.addEventListener('pointerdown', (e) => {
+function safeAreaInsets() {
+  const style = getComputedStyle(el.touchZone);
+  return {
+    left: parseFloat(style.getPropertyValue('--safe-left')) || 0,
+    top: parseFloat(style.getPropertyValue('--safe-top')) || 0,
+    bottom: parseFloat(style.getPropertyValue('--safe-bottom')) || 0,
+  };
+}
+
+el.touchZone.addEventListener('pointerdown', (e) => {
+  if (joyPointerId !== null || !latestState || latestState.phase !== 'playing') return;
   e.preventDefault();
   joyPointerId = e.pointerId;
-  el.joy.setPointerCapture(e.pointerId);
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  joyCenter = clampJoystickCenter({ x: e.clientX, y: e.clientY }, viewport, JOY_VISUAL_R, safeAreaInsets());
+  el.joy.style.left = `${joyCenter.x}px`;
+  el.joy.style.top = `${joyCenter.y}px`;
+  el.joy.classList.add('active');
+  el.touchZone.setPointerCapture(e.pointerId);
   updateJoystick(e);
 });
-el.joy.addEventListener('pointermove', (e) => {
+el.touchZone.addEventListener('pointermove', (e) => {
   if (e.pointerId !== joyPointerId) return;
   e.preventDefault();
   updateJoystick(e);
@@ -1806,9 +1895,9 @@ function joyRelease(e) {
   if (e.pointerId !== joyPointerId) return;
   resetJoystick();
 }
-el.joy.addEventListener('pointerup', joyRelease);
-el.joy.addEventListener('pointercancel', joyRelease);
-el.joy.addEventListener('lostpointercapture', joyRelease);
+el.touchZone.addEventListener('pointerup', joyRelease);
+el.touchZone.addEventListener('pointercancel', joyRelease);
+el.touchZone.addEventListener('lostpointercapture', joyRelease);
 
 el.btnInteract.addEventListener('pointerdown', (e) => {
   e.preventDefault();
