@@ -7,6 +7,7 @@ import { action, faceStation, join, loadWorker, makeContext, pump, startPlaying 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const definition=loadWorker(path.join(root,'src/worker/index.js'));
 function classic(){for(let seed=1;seed<400;seed++){const ctx=makeContext(definition,seed);join(ctx,definition);startPlaying(ctx,definition);if(ctx.state.mapId==='classic')return ctx;}throw new Error('classic seed');}
+function finishParty(ctx){for(let round=1;round<=3;round++){ctx.state.timeLeft=.05;pump(ctx,1);if(round===3)break;ctx.state.roundResultTime=.05;pump(ctx,1);ctx.state.countdown=.05;pump(ctx,1);}return ctx.state;}
 
 test('新世界模型中可完成取菜、切菜、烹饪、装盘与上菜',()=>{
   const ctx=classic(),state=ctx.state,p=state.players.host;
@@ -37,6 +38,36 @@ test('四人派对模式完成三轮换图并进入贡献结算',()=>{
     assert.equal(ctx.state.phase,'roundResult');ctx.state.roundResultTime=.05;pump(ctx,1);assert.equal(ctx.state.phase,'countdown');visited.push(ctx.state.mapId);ctx.state.countdown=.05;pump(ctx,1);assert.equal(ctx.state.phase,'playing');
   }
   assert.equal(ctx.state.phase,'awards');assert.equal(ctx.state.standings.length,4);assert.equal(new Set(visited).size,3);assert.ok(ctx.state.finalTitles);
+});
+
+test('跨局清理绝对冷却和所有瞬时状态，第二局第一次操作立即生效',()=>{
+  const ctx=makeContext(definition,23);join(ctx,definition);startPlaying(ctx,definition);const state=ctx.state,p=state.players.host;
+  const firstCrate=state.layout.stations.find((entry)=>entry.type==='crate');state.elapsed=179;faceStation(state,p,firstCrate);action(ctx,definition,'host','interact',{phase:'start',seq:1});
+  assert.ok(p.carrying);assert.ok(p.nextInteractAt>179);assert.ok(p.nextCrateAt>179);
+  p.working=true;p.charge={seq:1,held:.5};p.fall={remaining:.4};p.activeBuff={type:'fast_hands',remaining:8};p.input={dx:1,dz:0};p.vx=2;p.vz=1;
+  state.timeLeft=.05;pump(ctx,1);assert.equal(state.phase,'roundResult');
+  assert.equal(p.carrying,null);assert.equal(p.working,false);assert.equal(p.charge,null);assert.equal(p.fall,null);assert.equal(p.activeBuff,null);assert.equal(p.input.dx,0);assert.equal(p.input.dz,0);assert.equal(p.vx,0);assert.equal(p.vz,0);assert.equal(p.nextInteractAt,0);assert.equal(p.nextCrateAt,0);
+  state.roundResultTime=.05;pump(ctx,1);state.countdown=.05;pump(ctx,1);assert.equal(state.phase,'playing');
+  const secondCrate=state.layout.stations.find((entry)=>entry.type==='crate');faceStation(state,p,secondCrate);action(ctx,definition,'host','interact',{phase:'start',seq:2});assert.ok(p.carrying);
+  action(ctx,definition,'host','move',{dx:1,dz:0,seq:2});assert.equal(p.input.dx,1);assert.equal(p.input.dz,0);
+  action(ctx,definition,'host','work',{active:true,seq:2});assert.equal(p.working,true);
+});
+
+test('最终结算按排名站上不同高度领奖台，仅开放自由移动',()=>{
+  const ctx=makeContext(definition,91);join(ctx,definition);join(ctx,definition,'p3','三号');startPlaying(ctx,definition);finishParty(ctx);const state=ctx.state,p=state.players.host;
+  assert.equal(state.phase,'awards');assert.equal(state.layout.mapId,'awards');assert.equal(ctx.timers.has('tick'),true);assert.equal(state.layout.podiums.length,3);
+  assert.ok(state.layout.podiums[0].height>state.layout.podiums[1].height&&state.layout.podiums[1].height>state.layout.podiums[2].height);
+  for(const podium of state.layout.podiums){const standing=state.standings.find((entry)=>entry.rank===podium.rank),player=state.players[standing.id];assert.equal(player.x,podium.x);assert.equal(player.z,podium.z);assert.equal(player.awardsPodiumHeight,podium.height);}
+  const before={working:p.working,carrying:p.carrying,interactSeq:p.interactSeq,workSeq:p.workSeq};
+  action(ctx,definition,'host','work',{active:true,seq:99});action(ctx,definition,'host','interact',{phase:'start',seq:99});assert.equal(JSON.stringify({working:p.working,carrying:p.carrying,interactSeq:p.interactSeq,workSeq:p.workSeq}),JSON.stringify(before));
+  const beforeX=p.x,startingHeight=p.awardsPodiumHeight;action(ctx,definition,'host','move',{dx:1,dz:0,seq:99});assert.equal(p.input.dx,1);pump(ctx,1);assert.equal(p.awardsPodiumHeight,startingHeight);pump(ctx,4);assert.ok(p.x>beforeX);assert.equal(p.awardsPodiumHeight,0);assert.equal(p.awardsPodiumRank,0);
+  action(ctx,definition,'p2','rematch');action(ctx,definition,'p2','toLobby');assert.equal(state.phase,'awards');
+  action(ctx,definition,'host','toLobby');assert.equal(state.phase,'lobby');assert.equal(state.layout,null);assert.equal(ctx.timers.has('tick'),false);
+});
+
+test('房主可从结算大厅开始全新对局',()=>{
+  const ctx=makeContext(definition,37);join(ctx,definition);startPlaying(ctx,definition);finishParty(ctx);const previousGameSeq=ctx.state.gameSeq;action(ctx,definition,'host','rematch');
+  assert.equal(ctx.state.phase,'countdown');assert.ok(ctx.state.gameSeq>previousGameSeq);assert.equal(ctx.state.players.host.nextInteractAt,0);assert.equal(ctx.state.players.host.nextCrateAt,0);assert.equal(ctx.timers.has('tick'),true);
 });
 
 test('无尽模式订单超时累积怒气并触发最终结算',()=>{

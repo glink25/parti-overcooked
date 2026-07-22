@@ -7,13 +7,15 @@ import * as THREE from 'three';
 import demoStateJson from './demoState.json';
 import { createAudioEngine, orderWarningLevel, potWarningLevel } from './audio.js';
 import { PLAYER_R, reconcilePrediction, stepMovement, worldStation } from './movement.js';
+import { phaseCapabilities, sceneIdentity } from './phase.js';
 import { advanceDeadZoneCenter, cameraPoses, countdownIntroProgress, lerpCameraPose, nextCameraFollowMode } from './visual/camera.js';
 import { animateChefModel, kickChef, makeChefModel } from './visual/chef.js';
-import { conveyorArrowQuaternion, conveyorPathRects, conveyorSegment } from './visual/conveyor.js';
+import { conveyorArrowQuaternion, conveyorPathMetrics, conveyorPathRects, conveyorPointAtDistance, conveyorSegment } from './visual/conveyor.js';
 import { createEnvironmentController } from './visual/environment.js';
 import { createEffectSystem } from './visual/effects.js';
 import { createMaterialSystem } from './visual/materials.js';
 import { ingredientVisual } from './visual/ingredients.js';
+import { createPlatformEdgeGroup } from './visual/map-edges.js';
 import { ingredientBadge, plateStationState } from './visual/orders.js';
 import { clampJoystickCenter, joystickVector, shortActionLabel } from './visual/touch-controls.js';
 import { computeRenderPixelRatio, detectQualityTier, qualitySettings, themeFor } from './visual/themes.js';
@@ -144,7 +146,7 @@ const el = {
   rematchBtn: $('rematch-btn'), tolobbyBtn: $('tolobby-btn'),
   roundResult: $('round-result'), roundTitle: $('round-title'), roundComment: $('round-comment'), roundBoard: $('round-board'), roundNext: $('round-next'),
   awardsHud: $('awards-hud'), awardBoard: $('award-board'), awardTotal: $('award-total'), finalComment: $('final-comment'), awardsActions: $('awards-actions'),
-  awardRematchBtn: $('award-rematch-btn'), awardLobbyBtn: $('award-lobby-btn'),
+  awardRematchBtn: $('award-rematch-btn'), awardLobbyBtn: $('award-lobby-btn'), awardNote: $('award-note'),
   touchUi: $('touch-ui'), touchZone: $('touch-zone'), joy: $('joy'), joyKnob: $('joy-knob'),
   btnInteract: $('btn-interact'), btnWork: $('btn-work'),
   audioToggle: $('audio-toggle'),
@@ -526,10 +528,10 @@ function setBar(barGrp, frac, color) {
 }
 
 // ---------------------------------------------------------------------------
-// 地图场景构建（每局 gameSeq 变化时重建一次）
+// 地图场景构建（gameSeq + mapId 身份变化时原子替换）
 // ---------------------------------------------------------------------------
 let mapGroup = null;
-let builtGameSeq = -1;
+let builtSceneKey = null;
 let builtLayout = null;
 let environmentProgress = 0;
 let cameraFollowMode = false;
@@ -747,18 +749,23 @@ function buildStation(st) {
   return node;
 }
 
-function disposeMap() {
-  if (!mapGroup) return;
+function disposeMap({ clearPlayers = false } = {}) {
   environment.dispose();
-  scene.remove(mapGroup);
-  mapGroup.traverse((o) => {
-    if (o.geometry) o.geometry.dispose();
-    if (o.isSprite && o.material) {
-      if (o.material.map) o.material.map.dispose();
-      o.material.dispose();
-    }
-  });
+  if (mapGroup) {
+    scene.remove(mapGroup);
+    mapGroup.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (Array.isArray(o.userData.ownedMaterials)) for (const material of o.userData.ownedMaterials) material.dispose();
+      if (o.userData.ownedMaterial && o.material) o.material.dispose();
+      if (o.isSprite && o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+  }
   mapGroup = null;
+  builtSceneKey = null;
+  builtLayout = null;
   stationNodes.clear();
   platformNodes.clear();
   conveyorNodes.clear();
@@ -766,6 +773,24 @@ function disposeMap() {
   worldItemPool.clear();
   groundBuffNode = null;
   gateNodes.clear();
+  effects.clear();
+  targetRing.visible = false;
+  throwPreview.visible = false;
+  throwLanding.visible = false;
+  el.bubble.classList.add('hidden');
+  if (clearPlayers) {
+    for (const node of playerNodes.values()) scene.remove(node.group);
+    playerNodes.clear();
+    selfPos = null;
+    serverSelf = null;
+  }
+}
+
+function showSafeScene(themeId = 'awards') {
+  const safeTheme = themeFor(themeId);
+  document.body.dataset.mapTheme = safeTheme.id;
+  scene.background = new THREE.Color(safeTheme.sky);
+  scene.fog = new THREE.FogExp2(safeTheme.fog, safeTheme.fogDensity);
 }
 
 function buildMap(layout) {
@@ -821,8 +846,16 @@ function buildMap(layout) {
   }
   floorMeshes.forEach((mesh, i) => { mesh.count = floorCounts[i]; mesh.receiveShadow = true; mapGroup.add(mesh); });
   mapGroup.add(wallMesh, trimMesh);
-  let waterCount=0;for(const row of layout.terrain)for(const cell of row)if(cell==='~')waterCount++;
-  if(waterCount){const waterMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(.98,.05,.98),mat(0x49bcd3,{transparent:true,opacity:.78,emissive:0x167d9a,emissiveIntensity:.18}),waterCount);let wi=0;for(let z=0;z<h;z++)for(let x=0;x<w;x++)if(layout.terrain[z][x]==='~'){dummy.position.set(x+.5,-.16,z+.5);dummy.updateMatrix();waterMesh.setMatrixAt(wi++,dummy.matrix);}mapGroup.add(waterMesh);}
+  const visibleWaterCell = (x, z) => {
+    if (layout.terrain[z]?.[x] !== '~' || activeTheme.id === 'ring') return false;
+    if (activeTheme.id !== 'snow') return true;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      if (Math.abs(dx) + Math.abs(dz) <= 2 && ['.', 'i', '#'].includes(layout.terrain[z + dz]?.[x + dx])) return true;
+    }
+    return (layout.hazards || []).some((hazard) => (hazard.cells || []).some((cell) => cell.x === x && cell.z === z));
+  };
+  let waterCount=0;for(let z=0;z<h;z++)for(let x=0;x<w;x++)if(visibleWaterCell(x,z))waterCount++;
+  if(waterCount){const waterMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(.98,.05,.98),mat(0x49bcd3,{transparent:true,opacity:.78,emissive:0x167d9a,emissiveIntensity:.18}),waterCount);let wi=0;for(let z=0;z<h;z++)for(let x=0;x<w;x++)if(visibleWaterCell(x,z)){dummy.position.set(x+.5,-.16,z+.5);dummy.updateMatrix();waterMesh.setMatrixAt(wi++,dummy.matrix);}mapGroup.add(waterMesh);}
   for(const marker of layout.hazardMarkers||[]){const warning=new THREE.Mesh(new THREE.RingGeometry(.22,.42,3),mat(0xffb300,{emissive:0xff6f00,emissiveIntensity:.9,side:THREE.DoubleSide}));warning.rotation.x=-Math.PI/2;warning.rotation.z=Math.PI;warning.position.set(marker.x,.015,marker.z);warning.userData.hazardMarker=true;mapGroup.add(warning);}
   for(const hazard of layout.hazards||[])if(hazard.type==='iceCrevasse')for(const cell of hazard.cells||[]){
     const pit=box(.94,.42,.94,0x020b13,{kind:'noise',accent:0x0d5470,emissive:0x041a2a,emissiveIntensity:.55});pit.position.set(cell.x+.5,-.2,cell.z+.5);mapGroup.add(pit);
@@ -839,6 +872,7 @@ function buildMap(layout) {
   for (const platform of layout.platforms || []) {
     const group = new THREE.Group();
     group.position.set(platform.origin.x, 0, platform.origin.z);
+    if (activeTheme.edgeProfile?.kind === 'platforms') group.add(createPlatformEdgeGroup(platform, activeTheme.edgeProfile, mat));
     const counts=[0,0],tilesByMaterial=[[],[]];for(const tile of platform.tiles||[]){const index=tile.kind==='i'?1:((tile.x+tile.z)&1);tilesByMaterial[index].push(tile);}
     for(let materialIndex=0;materialIndex<2;materialIndex++){if(!tilesByMaterial[materialIndex].length)continue;const mesh=new THREE.InstancedMesh(floorGeometry,floorMaterials[materialIndex],tilesByMaterial[materialIndex].length),localDummy=new THREE.Object3D();for(const tile of tilesByMaterial[materialIndex]){localDummy.position.set(tile.x+.5,-.05,tile.z+.5);localDummy.updateMatrix();mesh.setMatrixAt(counts[materialIndex]++,localDummy.matrix);}mesh.receiveShadow=true;group.add(mesh);}
     const directionHint = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 3), mat(0x55e8ff, { emissive: 0x168ead, emissiveIntensity: 0.7 }));
@@ -867,31 +901,77 @@ function buildMap(layout) {
   }
 
   for (const mechanism of (layout.mechanisms || []).filter((entry) => entry.type === 'conveyor')) {
-    const group = new THREE.Group(); const points = mechanism.config.path.points;
+    const group = new THREE.Group();
+    const points = mechanism.config.path.points;
+    const metrics = conveyorPathMetrics(points);
+    const rollers = [];
+    const arrows = [];
+    const warningMaterials = [];
+    const deckMaterial = mat(0x546a73, { kind: 'metal', accent: 0xe3b93e, emissive: 0x16252b, emissiveIntensity: .12 }).clone();
+    const rollerMaterial = mat(0x9fb0b5, { kind: 'metal', accent: 0x44565d, emissive: 0x18242a, emissiveIntensity: .08 }).clone();
+    const arrowMaterial = mat(0xffd64a, { emissive: 0xb56c00, emissiveIntensity: .58 }).clone();
+    // 滚轴高速旋转时，低多边形的平面明暗会产生频闪；滚轴使用平滑着色，
+    // 并将转速作为独立的纯视觉参数处理，箭头仍严格使用路径配置速度。
+    rollerMaterial.flatShading = false;
+    rollerMaterial.roughness = .68;
+    rollerMaterial.metalness = .18;
+    rollerMaterial.needsUpdate = true;
+    for (const material of [deckMaterial, rollerMaterial, arrowMaterial]) material.userData = { ...(material.userData || {}), conveyorOwned: true };
+    warningMaterials.push(
+      { material: deckMaterial, emissive: 0x16252b, intensity: .12 },
+      { material: rollerMaterial, emissive: 0x18242a, intensity: .08 },
+      { material: arrowMaterial, emissive: 0xb56c00, intensity: .58 },
+    );
     for (let i = 1; i < points.length; i++) {
-      const a=points[i-1],b=points[i],segment=conveyorSegment(a,b),body=box(.8,.72,segment.length,0x344852,{kind:'metal',accent:0x1d2d34}),rail=box(.76,.14,segment.length,0x657b84,{kind:'metal',accent:0xf6c344}),stripe=box(.08,.025,Math.max(.12,segment.length-.08),0xf6c344,{emissive:0x8f6200,emissiveIntensity:.28});
-      body.position.set(segment.centerX,.36,segment.centerZ);body.rotation.y=segment.angle;rail.position.set(segment.centerX,.79,segment.centerZ);rail.rotation.y=segment.angle;stripe.position.set(rail.position.x,.875,rail.position.z);stripe.rotation.y=segment.angle;stripe.userData.conveyorStripe=true;group.add(body,rail,stripe);
-      for(const side of [-1,1]){const guard=box(.055,.16,segment.length,0xc5d1d5,{kind:'metal',accent:0x5e7077});guard.position.set(segment.centerX+segment.dz*side*.38,.93,segment.centerZ-segment.dx*side*.38);guard.rotation.y=segment.angle;group.add(guard);}
-      const arrowCount=Math.max(1,Math.floor(segment.length/1.8));
-      for(let arrowIndex=0;arrowIndex<arrowCount;arrowIndex++){
-        const t=(arrowIndex+.5)/arrowCount;
-        const arrow=new THREE.Mesh(new THREE.ConeGeometry(.11,.34,3),mat(0xffd64a,{emissive:0xb56c00,emissiveIntensity:.45}));
-        arrow.userData.forwardQuaternion=conveyorArrowQuaternion(segment);arrow.userData.reverseQuaternion=conveyorArrowQuaternion(segment,true);arrow.quaternion.copy(arrow.userData.forwardQuaternion);
-        arrow.position.set(a.x+(b.x-a.x)*t,.93,a.z+(b.z-a.z)*t);arrow.userData.conveyorArrow=true;group.add(arrow);
+      const segment = conveyorSegment(points[i - 1], points[i]);
+      const segmentRoot = new THREE.Group();
+      segmentRoot.position.set(segment.centerX, 0, segment.centerZ);
+      segmentRoot.rotation.y = segment.angle;
+      const chassis = box(.82, .68, segment.length, 0x263941, { kind: 'metal', accent: 0x101c21 }); chassis.position.y = .34;
+      const bed = new THREE.Mesh(new THREE.BoxGeometry(.72, .09, Math.max(.12, segment.length - .06)), deckMaterial); bed.position.y = .765; bed.castShadow = true; bed.userData.ownedMaterial = false;
+      segmentRoot.add(chassis, bed);
+      const rollerSpacing = qualityTier === 'low' ? .48 : .32;
+      const rollerCount = Math.max(2, Math.ceil(segment.length / rollerSpacing));
+      for (let rollerIndex = 0; rollerIndex < rollerCount; rollerIndex++) {
+        const pivot = new THREE.Group();
+        const roller = new THREE.Mesh(new THREE.CylinderGeometry(.072, .072, .69, 8), rollerMaterial);
+        roller.castShadow = true;
+        roller.userData.ownedMaterial = false;
+        pivot.rotation.z = Math.PI / 2;
+        pivot.position.set(0, .835, -segment.length / 2 + (rollerIndex + .5) * segment.length / rollerCount);
+        pivot.add(roller); segmentRoot.add(pivot); rollers.push(roller);
       }
+      for (const side of [-1, 1]) {
+        const guard = box(.065, .19, segment.length, 0xb9c7ca, { kind: 'metal', accent: 0x53676e }); guard.position.set(side * .405, .93, 0);
+        const lowerRail = box(.075, .08, segment.length, 0x182a31, { kind: 'metal', accent: 0x0e181c }); lowerRail.position.set(side * .4, .62, 0);
+        segmentRoot.add(guard, lowerRail);
+      }
+      group.add(segmentRoot);
     }
-    for(let index=1;index<points.length-1;index++){const corner=box(.8,.14,.8,0x657b84,{kind:'metal',accent:0xf6c344});corner.position.set(points[index].x,.79,points[index].z);group.add(corner);}
+    for(let index=1;index<points.length-1;index++){const corner=cyl(.41,.41,.16,0x536a73,10,{kind:'metal',accent:0xe3b93e});corner.position.set(points[index].x,.78,points[index].z);group.add(corner);}
+    const arrowSpacing = qualityTier === 'low' ? 1.8 : 1.25;
+    const arrowCount = Math.max(2, Math.floor(metrics.total / arrowSpacing));
+    for (let index = 0; index < arrowCount; index++) {
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(.12, .38, 3), arrowMaterial);
+      arrow.castShadow = true;
+      arrow.userData.ownedMaterial = false;
+      arrow.userData.conveyorArrow = true;
+      arrow.userData.baseDistance = (index + .5) * metrics.total / arrowCount;
+      arrows.push(arrow); group.add(arrow);
+    }
     for(const port of layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.conveyorId===mechanism.id)){const center={x:port.x+.5,z:port.z+.5},target=port.pathPoint;if(Math.hypot(center.x-target.x,center.z-target.z)>.75){const segment=conveyorSegment(center,target),tube=box(.34,.32,segment.length,0x283c45,{kind:'metal',accent:port.portMode==='input'?0x48d597:0x55b9ff});tube.position.set(segment.centerX,.88,segment.centerZ);tube.rotation.y=segment.angle;group.add(tube);}}
     group.userData.supportId=mechanism.config.supportId||null;
+    group.userData.conveyorMotion = { points, metrics, total: metrics.total, speed: Number(mechanism.config.path.speed) || 1, rollerVisualSpeed: .2, phase: 0, lastAt: null, arrows, rollers, warningMaterials };
+    group.userData.ownedMaterials = [deckMaterial, rollerMaterial, arrowMaterial];
     conveyorNodes.set(mechanism.id,group);mapGroup.add(group);
   }
 
   if (layout.mapId === 'awards') {
-    const podiums = [{ x: 7.5, z: 2.4, h: 1.5, label: '1', color: 0xffd23f }, { x: 5.8, z: 2.7, h: 1.05, label: '2', color: 0xcbd3dc }, { x: 9.2, z: 2.8, h: 0.78, label: '3', color: 0xc88755 }];
+    const podiums = layout.podiums || [];
     for (const p of podiums) {
-      const block = box(1.45, p.h, 1.35, p.color, { kind: 'noise', accent: 0xffffff });
-      block.position.set(p.x, p.h / 2, p.z); mapGroup.add(block);
-      const badge = makeStationBadge(p.label, p.color); badge.position.set(p.x, p.h + 0.55, p.z); mapGroup.add(badge);
+      const block = box(1.45, p.height, 1.35, p.color, { kind: 'noise', accent: 0xffffff });
+      block.position.set(p.x, p.height / 2, p.z); mapGroup.add(block);
+      const badge = makeStationBadge(p.label, p.color); badge.position.set(p.x, p.height + 0.55, p.z); mapGroup.add(badge);
     }
     addBuntingToAwards(mapGroup, w);
   }
@@ -1140,12 +1220,15 @@ function applyPlayers(state, dt) {
       buffRing.rotation.x = Math.PI / 2; buffRing.position.y = 0.08; buffRing.visible = false; group.add(buffRing);
       scene.add(group);
       const yaw = p.face && (p.face.dx || p.face.dz) ? Math.atan2(p.face.dx, p.face.dz) : 0;
-      node = { group, render: { x: p.x, z: p.z }, target: { x: p.x, z: p.z }, label, buffRing, state: p, yaw, targetYaw: yaw };
+      node = { group, render: { x: p.x, y: Number(p.awardsPodiumHeight)||0, z: p.z }, target: { x: p.x, y: Number(p.awardsPodiumHeight)||0, z: p.z }, label, buffRing, state: p, yaw, targetYaw: yaw, sceneKey: null };
       playerNodes.set(id, node);
     }
     node.state = p;
     node.target.x = p.x;
+    node.target.y = Number(p.awardsPodiumHeight)||0;
     node.target.z = p.z;
+    const nextSceneKey=sceneIdentity(state);
+    if(node.sceneKey!==nextSceneKey){node.sceneKey=nextSceneKey;node.render.x=p.x;node.render.y=node.target.y;node.render.z=p.z;}
     node.buffRing.visible = !!p.activeBuff;
     if (p.activeBuff) node.buffRing.material.color.setHex(BUFF_INFO[p.activeBuff.type]?.[2] || 0xffffff);
 
@@ -1196,7 +1279,7 @@ function applyPlayers(state, dt) {
   }
 }
 
-function canMoveNow() { return latestState && (latestState.phase === 'playing' || latestState.phase === 'awards'); }
+function canMoveNow() { return !!latestState && phaseCapabilities(latestState.phase).move; }
 function stepPrediction(dt) {
   if (!selfPos || !builtLayout || !canMoveNow()) return;
   const ix = selfInput.dx;
@@ -1247,8 +1330,9 @@ function interpolatePlayers(dt) {
         node.render.z += dz * k;
       }
     }
+    node.render.y += (node.target.y - node.render.y) * Math.min(1, dt * 10);
     const fallY=node.state?.fall?-1.15*(1-Math.max(0,node.state.fall.remaining)/.8):0;
-    node.group.position.set(node.render.x, fallY, node.render.z);
+    node.group.position.set(node.render.x, node.render.y + fallY, node.render.z);
     const fallbackSpeed = Math.hypot(node.render.x - beforeX, node.render.z - beforeZ) / Math.max(dt, 0.001);
     const source = id === myId && selfPos ? selfPos : node.state;
     const hasVelocity = source && Number.isFinite(source.vx) && Number.isFinite(source.vz);
@@ -1513,8 +1597,7 @@ function ingDotsHtml(items) {
   return items.map((item) => {
     const requirement = normalizedRequirement(item);
     const badge = ingredientBadge(ING, requirement.ingredient, requirement.prep);
-    const prepName = requirement.prep === 'chopped' ? '切碎' : '完整';
-    return `<i class="${badge.prep}" style="--ingredient:${badge.color}" aria-label="${prepName}${badge.name}" title="${prepName}${badge.name}">${badge.label}</i>`;
+    return `<i class="${badge.prep}" style="--ingredient:${badge.color}" role="img" aria-label="${badge.ariaLabel}" title="${badge.ariaLabel}"><span aria-hidden="true">${badge.label}</span></i>`;
   }).join('');
 }
 
@@ -1528,8 +1611,8 @@ function applyOrders(state) {
       d.className = 'order-card';
       const recipe = RECIPES.find((r) => r.id === o.recipeId) || RECIPES.find((r) => recipeKey(r.items) === o.key);
       const requirements = orderRequirements(o, recipe);
-      d.innerHTML = `<div class="o-head"><span class="o-type">${recipe && recipe.cook ? '🍲' : '🥗'}</span><div class="o-name">${o.name}<small>${o.points}分</small></div></div>
-        <div class="o-dots">${ingDotsHtml(requirements)}</div>
+      d.innerHTML = `<div class="o-main"><span class="o-type">${recipe && recipe.cook ? '🍲' : '🥗'}</span><div class="o-dots">${ingDotsHtml(requirements)}</div></div>
+        <div class="o-meta"><span class="o-name">${o.name}</span><small class="o-points">${o.points}分</small></div>
         <div class="o-bar"><i></i></div>`;
       el.orders.appendChild(d);
       card = { el: d, fill: d.querySelector('.o-bar i') };
@@ -1622,7 +1705,33 @@ function applyWorldFeatures(state) {
     node.position.set(item.x,(item.mode==='conveyor'?1.04:.25)+flight,item.z);node.visible=(item.expiresAt-(state.elapsed||0)>5)||Math.floor(perfNow*8)%2===0;
   }
   for(const [id,node] of worldItemNodes)if(!seen.has(id)){mapGroup.remove(node);node.visible=false;const pool=worldItemPool.get(node.userData.poolKey)||[];pool.push(node);worldItemPool.set(node.userData.poolKey,pool);worldItemNodes.delete(id);}
-  for(const [id,node] of conveyorNodes){const runtime=state.mechanisms?.[id],support=node.userData.supportId,platform=support?state.platforms?.[support]:null,def=support?builtLayout.platforms.find((entry)=>entry.id===support):null;node.position.set(def?def.origin.x+(platform?.x||0):0,0,def?def.origin.z+(platform?.z||0):0);node.children.forEach((child,index)=>{if(child.userData.conveyorArrow)child.quaternion.copy(runtime?.direction===-1?child.userData.reverseQuaternion:child.userData.forwardQuaternion);const baseColor=child.userData.conveyorArrow ? 0xb56c00 : (child.userData.conveyorStripe ? 0x8f6200 : 0x000000),baseIntensity=child.userData.conveyorArrow ? .45 : (child.userData.conveyorStripe ? .28 : 0);child.material.emissive?.setHex(runtime?.warning?0xff8a00:baseColor);child.material.emissiveIntensity=runtime?.warning?0.8+Math.sin(perfNow*10+index)*0.3:baseIntensity;});}
+  for (const [id, node] of conveyorNodes) {
+    const runtime = state.mechanisms?.[id];
+    const support = node.userData.supportId;
+    const platform = support ? state.platforms?.[support] : null;
+    const def = support ? builtLayout.platforms.find((entry) => entry.id === support) : null;
+    node.position.set(def ? def.origin.x + (platform?.x || 0) : 0, 0, def ? def.origin.z + (platform?.z || 0) : 0);
+    const motion = node.userData.conveyorMotion;
+    if (!motion) continue;
+    const direction = runtime?.direction === -1 ? -1 : 1;
+    const dt = motion.lastAt == null ? 0 : Math.min(.05, Math.max(0, perfNow - motion.lastAt));
+    motion.lastAt = perfNow;
+    motion.phase += dt * motion.speed * direction;
+    for (const roller of motion.rollers) roller.rotation.y -= dt * motion.speed * direction * motion.rollerVisualSpeed / .072;
+    for (let index = 0; index < motion.arrows.length; index++) {
+      const arrow = motion.arrows[index];
+      const sample = conveyorPointAtDistance(motion.points, arrow.userData.baseDistance + motion.phase, { loop: true, metrics: motion.metrics });
+      arrow.position.set(sample.x, .985, sample.z);
+      arrow.quaternion.copy(conveyorArrowQuaternion(sample, direction < 0));
+      const pulse = runtime?.warning ? 1 + Math.sin(perfNow * 4 + index * .45) * .06 : 1;
+      arrow.scale.setScalar(pulse);
+    }
+    const warningPulse = .86 + Math.sin(perfNow * 4) * .14;
+    for (const entry of motion.warningMaterials) {
+      entry.material.emissive.setHex(runtime?.warning ? 0xff8a00 : entry.emissive);
+      entry.material.emissiveIntensity = runtime?.warning ? warningPulse : entry.intensity;
+    }
+  }
 }
 
 // ---- 大厅 ----
@@ -1739,20 +1848,28 @@ function applyAwards(state) {
   renderComment(el.finalComment, state.finalComment);
   el.awardBoard.innerHTML = rankingRows(state.standings || [], false, state.finalTitles || {});
   el.awardsActions.classList.toggle('hidden', !isHost);
+  el.awardNote.classList.toggle('hidden', !!isHost);
 }
 
 function setPhase(phase, state) {
   if (phase === currentPhase) return;
+  const previousCapabilities = phaseCapabilities(currentPhase);
+  const capabilities = phaseCapabilities(phase);
+  if ((currentPhase === 'playing' && phase !== 'playing') || (previousCapabilities.move && !capabilities.move)) releaseAllInput();
   currentPhase = phase;
-  el.app.classList.toggle('gesture-locked', phase === 'playing' || phase === 'countdown' || phase === 'awards');
+  el.app.classList.toggle('gesture-locked', capabilities.gestureLocked);
   el.lobby.classList.toggle('hidden', phase !== 'lobby');
   el.ended.classList.toggle('hidden', phase !== 'ended');
   el.roundResult.classList.toggle('hidden', phase !== 'roundResult');
   el.awardsHud.classList.toggle('hidden', phase !== 'awards');
-  if (phase !== 'awards') el.awardsActions.classList.add('hidden');
+  if (phase !== 'awards') {
+    el.awardsActions.classList.add('hidden');
+    el.awardNote.classList.add('hidden');
+  }
   el.hud.classList.toggle('hidden', !(phase === 'playing' || phase === 'countdown'));
   el.countdown.classList.toggle('hidden', phase !== 'countdown');
-  el.touchUi.classList.toggle('hidden', !(IS_TOUCH && (phase === 'playing' || phase === 'awards')));
+  el.touchUi.classList.toggle('hidden', !(IS_TOUCH && capabilities.touchControls));
+  el.touchUi.classList.toggle('movement-only', !capabilities.actionButtons);
   if (phase === 'ended') applyEnded(state);
   if (phase === 'lobby') {
     // 离开对局时清掉 3D 场景以外的杂项
@@ -1836,28 +1953,41 @@ function applyAudioState(previous, state) {
   }
 }
 
+function syncSceneForState(state) {
+  const nextSceneKey = sceneIdentity(state);
+  if (!nextSceneKey) {
+    if (builtSceneKey || mapGroup || builtLayout) disposeMap({ clearPlayers: true });
+    builtSceneKey = null;
+    showSafeScene(state.phase === 'awards' ? 'awards' : 'classic');
+    return;
+  }
+  if (nextSceneKey === builtSceneKey && builtLayout) {
+    builtLayout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
+    return;
+  }
+  try {
+    buildMap(state.layout);
+    builtSceneKey = nextSceneKey;
+    builtLayout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
+    selfPos = null;
+    serverSelf = null;
+  } catch (error) {
+    builtSceneKey = null;
+    disposeMap({ clearPlayers: true });
+    showSafeScene(state.phase === 'awards' ? 'awards' : 'classic');
+    parti.log('scene build failed', { phase: state.phase, mapId: state.layout?.mapId, error: String(error) });
+  }
+}
+
 parti.onState((state) => {
   const previousState = latestState;
   latestState = state;
-  if (builtLayout && state.layout) {
-    builtLayout._runtime = { platforms: state.platforms || {}, mechanisms: state.mechanisms || {} };
-  }
   if (state.phase === 'countdown') {
     introCountdownValue = state.countdown || 0;
     introCountdownReceivedAt = performance.now();
   }
   applyAudioState(previousState, state);
-  if (state.layout && state.gameSeq !== builtGameSeq) {
-    builtGameSeq = state.gameSeq;
-    buildMap(state.layout);
-    selfPos = null;
-    serverSelf = null;
-  }
-  if (!state.layout && builtLayout) {
-    builtLayout = null;
-    builtGameSeq = -1;
-    disposeMap();
-  }
+  syncSceneForState(state);
   setPhase(state.phase, state);
   if (state.phase === 'lobby') applyLobby(state);
   if (state.phase === 'countdown') {
@@ -1870,7 +2000,7 @@ parti.onState((state) => {
     applyWorldFeatures(state);
   }
   if (state.phase === 'roundResult') applyRoundResult(state);
-  if (state.phase === 'awards') { applyAwards(state); applyPlayers(state); }
+  if (state.phase === 'awards') applyPlayers(state);
 });
 
 parti.onEvent('game:countdown', (p) => { toast(`地图：${p.mapName || ''}，各就各位！`); audio.playSfx('join'); });
@@ -1932,24 +2062,28 @@ function keyboardVector() {
 }
 
 function setWork(on) {
+  const capabilities = phaseCapabilities(latestState?.phase);
+  if (on && !capabilities.work) return;
   if (workHeld === on) return;
   workHeld = on;
-  parti.action('work', { active: on, seq: ++workSeq });
+  if (capabilities.work) parti.action('work', { active: on, seq: ++workSeq });
   el.btnWork.classList.toggle('on', on);
 }
 
 function startInteract(source) {
-  if(activeInteract)return;activeInteract={source,seq:++interactSeq,startedAt:performance.now()};parti.action('interact',{phase:'start',seq:activeInteract.seq});el.btnInteract.classList.add('on');
+  if(!phaseCapabilities(latestState?.phase).interact||activeInteract)return;activeInteract={source,seq:++interactSeq,startedAt:performance.now()};parti.action('interact',{phase:'start',seq:activeInteract.seq});el.btnInteract.classList.add('on');
 }
 function finishInteract(source,cancel=false) {
-  if(!activeInteract||activeInteract.source!==source)return;parti.action('interact',{phase:cancel?'cancel':'release',seq:activeInteract.seq});activeInteract=null;el.btnInteract.classList.remove('on');throwPreview.visible=false;throwLanding.visible=false;touchActionKey='';
+  if(!activeInteract||activeInteract.source!==source)return;if(phaseCapabilities(latestState?.phase).interact)parti.action('interact',{phase:cancel?'cancel':'release',seq:activeInteract.seq});activeInteract=null;el.btnInteract.classList.remove('on');throwPreview.visible=false;throwLanding.visible=false;touchActionKey='';
 }
 
-function sendMove(v) {
+function sendMove(v, { forceLocal = false } = {}) {
+  const canSend = phaseCapabilities(latestState?.phase).move;
+  if (!canSend && !forceLocal) return;
   if (Math.abs(v.dx - lastSentMove.dx) < 0.001 && Math.abs(v.dz - lastSentMove.dz) < 0.001) return;
   const seq = lastSentMove.seq + 1;
   lastSentMove = { dx: v.dx, dz: v.dz, seq };
-  parti.action('move', { dx: v.dx, dz: v.dz, seq });
+  if (canSend) parti.action('move', { dx: v.dx, dz: v.dz, seq });
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1957,6 +2091,7 @@ window.addEventListener('keydown', (e) => {
     if (MOVE_KEYS.has(e.code) || e.code === 'Space') e.preventDefault();
     return;
   }
+  if (!phaseCapabilities(latestState?.phase).move) return;
   if (MOVE_KEYS.has(e.code) || INTERACT_KEYS.has(e.code) || WORK_KEYS.has(e.code)) e.preventDefault();
   if (MOVE_KEYS.has(e.code)) keysDown.add(e.code);
   else if (INTERACT_KEYS.has(e.code)) startInteract(`key:${e.code}`);
@@ -1976,9 +2111,17 @@ function releaseAllInput() {
   if(activeInteract)finishInteract(activeInteract.source,true);
   keysDown.clear();
   setWork(false);
-  sendMove({ dx: 0, dz: 0 });
+  sendMove({ dx: 0, dz: 0 }, { forceLocal: true });
   selfInput = { dx: 0, dz: 0 };
   resetJoystick();
+  targetRing.visible = false;
+  throwPreview.visible = false;
+  throwLanding.visible = false;
+  el.bubble.classList.add('hidden');
+  el.btnInteract.classList.remove('on');
+  el.btnWork.classList.remove('on');
+  bubbleLastKey = '';
+  touchActionKey = '';
 }
 window.addEventListener('blur', releaseAllInput);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAllInput(); });
@@ -2015,7 +2158,7 @@ function safeAreaInsets() {
 }
 
 el.touchZone.addEventListener('pointerdown', (e) => {
-  if (joyPointerId !== null || !latestState || latestState.phase !== 'playing') return;
+  if (joyPointerId !== null || !phaseCapabilities(latestState?.phase).move) return;
   e.preventDefault();
   joyPointerId = e.pointerId;
   const viewport = { width: window.innerWidth, height: window.innerHeight };

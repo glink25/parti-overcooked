@@ -1,10 +1,13 @@
 export function ingredientBadge(ingredients, id, prep = null) {
   const ingredient = ingredients[id];
+  const normalizedPrep = prep === 'chopped' ? 'chopped' : 'whole';
+  const name = ingredient ? ingredient.name : '未知食材';
   return {
     color: ingredient ? '#' + ingredient.color.toString(16).padStart(6, '0') : '#999999',
     label: ingredient ? ingredient.name[0] : '?',
-    name: ingredient ? ingredient.name : '未知食材',
-    prep: prep === 'chopped' ? 'chopped' : 'whole',
+    name,
+    prep: normalizedPrep,
+    ariaLabel: `${normalizedPrep === 'chopped' ? '切碎' : '完整'}${name}`,
   };
 }
 

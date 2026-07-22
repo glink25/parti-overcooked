@@ -639,11 +639,13 @@ function tick(ctx) {
       const p = s.players[id];
       if (p.input.dx || p.input.dz) { const len = Math.hypot(p.input.dx, p.input.dz); if (len > 0.2) p.face = { dx: p.input.dx / len, dz: p.input.dz / len }; }
       stepPlayerMovement(s.layout, {platforms:s.platforms,mechanisms:s.mechanisms}, p, p.input, DT, ids.filter((other) => other !== id).map((other) => s.players[other]));
+      const podium=AWARDS_PODIUMS.find((entry)=>entry.rank===p.awardsPodiumRank);
+      if(podium&&p.awardsPodiumHeight>0&&(Math.abs(p.x-podium.x)>.725||Math.abs(p.z-podium.z)>.675)){p.awardsPodiumHeight=0;p.awardsPodiumRank=0;}
     }
   } else {
     return; // 不再续约，定时器停止
   }
-  armTick(ctx);
+  if (s.phase === 'countdown' || s.phase === 'playing' || s.phase === 'roundResult' || s.phase === 'awards') armTick(ctx);
 }
 
 function spawnOrder(ctx) {
@@ -686,14 +688,21 @@ function takeNextMap(ctx) {
   return s.mapQueue.shift();
 }
 
+function clearPlayerRuntime(p) {
+  p.input = { dx: 0, dz: 0 }; p.vx = 0; p.vz = 0; p.moveSeq = 0;
+  p.face = { dx: 0, dz: 1 }; p.carrying = null; p.working = false;
+  p.charge = null; p.fall = null; p.respawnGrace = 0; p.interactSeq = 0; p.workSeq = 0;
+  p.nextInteractAt = 0; p.nextCrateAt = 0;
+  p.awardsPodiumHeight = 0;
+  p.awardsPodiumRank = 0;
+  p.activeBuff = null;
+}
+
 function resetPlayerForLayout(p, sp, layout = null, runtime = null) {
   const point = layout ? worldPoint(layout,runtime,sp) : sp;
   p.x = point.x; p.z = point.z; p.supportId = sp.supportId || null;
   if(Number.isInteger(sp.slot))p.roundSpawnSlot=sp.slot;
-  p.input = { dx: 0, dz: 0 }; p.vx = 0; p.vz = 0; p.moveSeq = 0;
-  p.face = { dx: 0, dz: 1 }; p.carrying = null; p.working = false;
-  p.charge = null; p.fall = null; p.respawnGrace = 0; p.interactSeq = 0; p.workSeq = 0;
-  p.activeBuff = null;
+  clearPlayerRuntime(p);
   p.roundContributionScore = 0; p.roundServed = 0; p.roundPublicEvents = 0; p.roundStats = emptyStats();
 }
 
@@ -870,6 +879,22 @@ function syncPlayerRecord(s, id) {
   s.playerRecords[id] = { name: p.name, color: p.color, contributionScore: p.contributionScore, servedCount: p.servedCount, publicEvents: p.publicEvents, joinOrder: p.joinOrder, stats: normalizeStats(p.stats), roundSpawnSlot:p.roundSpawnSlot, roundSpawnGameSeq:s.gameSeq, roundSpawnMapId:s.mapId };
 }
 
+const AWARDS_PODIUMS = [
+  {rank:1,x:7.5,z:2.4,height:1.5,label:'1',color:0xffd23f},
+  {rank:2,x:5.8,z:2.7,height:1.05,label:'2',color:0xcbd3dc},
+  {rank:3,x:9.2,z:2.8,height:.78,label:'3',color:0xc88755},
+];
+const AWARDS_FLOOR_SPOTS = [{x:7.5,z:5.8},{x:5.5,z:5.8},{x:9.5,z:5.8},{x:7.5,z:6.6}];
+
+function placePlayerForAwards(s,id,index) {
+  const standing=s.standings.find((entry)=>entry.id===id);
+  const podium=AWARDS_PODIUMS.find((entry)=>entry.rank===standing?.rank);
+  const spot=podium||AWARDS_FLOOR_SPOTS[index%AWARDS_FLOOR_SPOTS.length];
+  resetPlayerForLayout(s.players[id],spot);
+  s.players[id].awardsPodiumHeight=podium?.height||0;
+  s.players[id].awardsPodiumRank=podium?.rank||0;
+}
+
 function finishSession(ctx) {
   const s = ctx.state;
   captureRoundResult(s);
@@ -881,14 +906,13 @@ function finishSession(ctx) {
   s.phase = 'awards'; s.layout = makeAwardsLayout(); s.stations = {}; s.platforms={}; s.mechanisms={}; s.worldItems={}; s.orders = [];
   s.gameSeq += 1;
   const ids = Object.keys(s.players);
-  const spots = [{x:7,z:3},{x:5,z:4},{x:9,z:4},{x:7,z:6}];
-  ids.forEach((id, i) => resetPlayerForLayout(s.players[id], spots[i] || spots[3]));
+  ids.forEach((id, i) => placePlayerForAwards(s,id,i));
   ctx.broadcast('game:over', { score: s.sessionScore, served: s.served, expired: s.expired });
   armTick(ctx);
 }
 
 function makeAwardsLayout() {
-  return {mapId:'awards',name:'颁奖广场',bounds:{w:15,h:9},terrain:terrain(15,9,(x,z)=>x>=1&&x<=13&&z>=1&&z<=7,()=>false,' '),platforms:[],stations:[],mechanisms:[],checkpoints:[{id:'awards',x:7,z:4}],spawns:[{slot:1,x:7,z:3},{slot:2,x:5,z:4},{slot:3,x:9,z:4},{slot:4,x:7,z:6}],camera:{minPixelsPerTile:44}};
+  return {mapId:'awards',name:'颁奖广场',bounds:{w:15,h:9},terrain:terrain(15,9,(x,z)=>x>=1&&x<=13&&z>=1&&z<=7,()=>false,' '),platforms:[],stations:[],mechanisms:[],podiums:AWARDS_PODIUMS.map((entry)=>({...entry})),checkpoints:[{id:'awards',x:7,z:4}],spawns:[{slot:1,x:7.5,z:2.4},{slot:2,x:5.8,z:2.7},{slot:3,x:9.2,z:2.8},{slot:4,x:7.5,z:5.8}],camera:{minPixelsPerTile:44}};
 }
 
 function finishRound(ctx) {
@@ -897,7 +921,7 @@ function finishRound(ctx) {
   if (s.mode === 'party' && s.roundIndex >= 3) return finishSession(ctx);
   s.nextMapId = takeNextMap(ctx); s.roundResultTime = ROUND_RESULT_T; s.phase = 'roundResult';
   s.orders = [];
-  for (const id in s.players) { const p = s.players[id]; p.input = { dx: 0, dz: 0 }; p.vx = p.vz = 0; p.working = false; }
+  for (const id in s.players) clearPlayerRuntime(s.players[id]);
   ctx.broadcast('round:over', { round: s.roundIndex, nextMapId: s.nextMapId, nextMapName: MAPS[s.nextMapId].name });
 }
 
@@ -1542,6 +1566,10 @@ export default defineRoom({
       respawnGrace: 0,
       interactSeq: 0,
       workSeq: 0,
+      nextInteractAt: 0,
+      nextCrateAt: 0,
+      awardsPodiumHeight: 0,
+      awardsPodiumRank: 0,
       activeBuff: null,
       contributionScore: previousRecord?.contributionScore || 0,
       roundContributionScore: 0,
@@ -1555,7 +1583,10 @@ export default defineRoom({
     };
     s.players[player.id] = p;
     syncPlayerRecord(s, player.id);
-    if ((s.phase === 'playing' || s.phase === 'countdown' || s.phase === 'awards') && s.layout) {
+    if (s.phase === 'awards' && s.layout) {
+      placePlayerForAwards(s,player.id,count);
+      syncPlayerRecord(s,player.id);
+    } else if ((s.phase === 'playing' || s.phase === 'countdown') && s.layout) {
       const used=new Set(Object.entries(s.players).filter(([id])=>id!==player.id).map(([,other])=>other.roundSpawnSlot).filter(Number.isInteger));
       const remembered=previousRecord?.roundSpawnGameSeq===s.gameSeq&&previousRecord?.roundSpawnMapId===s.mapId?previousRecord.roundSpawnSlot:null;
       const sp=s.layout.spawns.find((entry)=>entry.slot===remembered&&!used.has(entry.slot))||s.layout.spawns.find((entry)=>!used.has(entry.slot))||s.layout.spawns[count%s.layout.spawns.length];
@@ -1578,6 +1609,7 @@ export default defineRoom({
       s.mechanisms = {};
       s.worldItems = {};
       s.orders = [];
+      ctx.clearTimer('tick');
     }
   },
 
@@ -1619,13 +1651,9 @@ export default defineRoom({
       s.worldItems = {};
       s.orders = [];
       for (const id in s.players) {
-        const p = s.players[id];
-        p.carrying = null;
-        p.working = false;
-        p.input = { dx: 0, dz: 0 };
-        p.vx = 0;
-        p.vz = 0;
+        clearPlayerRuntime(s.players[id]);
       }
+      ctx.clearTimer('tick');
     },
 
     // 移动意图：{ dx, dz, seq }（持续状态，客户端在方向变化时发送）

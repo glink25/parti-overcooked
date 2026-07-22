@@ -12,6 +12,7 @@
     --accent-2: #ffb300;
     --good: #66bb6a;
     --bad: #ef5350;
+    --hud-surface-alpha: .82;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -36,49 +37,77 @@
   #hud { position: absolute; inset: 0; pointer-events: none; }
   #hud-tl {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px));
-    display: flex; flex-direction: column; gap: 6px;
+    display: grid; gap: 4px; width: max-content; max-width: calc(100vw - 20px);
+    padding: 7px 10px 6px; border: 3px solid var(--ink); border-radius: 14px;
+    background: linear-gradient(160deg, rgb(255 253 244 / var(--hud-surface-alpha)), rgb(255 232 190 / var(--hud-surface-alpha)));
+    box-shadow: 0 4px 0 rgba(38,23,18,.42), inset 0 1px 0 rgba(255,255,255,.7);
+    backdrop-filter: blur(2px);
   }
   .chip {
-    background: rgba(255, 248, 236, 0.92); border: 3px solid var(--ink); border-radius: 14px;
+    background: rgb(255 248 236 / var(--hud-surface-alpha)); border: 3px solid var(--ink); border-radius: 14px;
     padding: 5px 14px; font-weight: 800; font-size: 17px; box-shadow: 0 3px 0 rgba(0,0,0,.35);
     display: inline-flex; align-items: center; gap: 8px; width: max-content;
   }
+  #hud-primary { display: grid; grid-template-columns: auto 2px auto; align-items: center; gap: 10px; }
+  #time-chip, #score-chip { display: inline-flex; align-items: center; gap: 7px; font-weight: 900; line-height: 1; white-space: nowrap; }
+  #time-chip { font-size: 20px; }
+  #score-chip { justify-content: end; font-size: 19px; }
+  .hud-divider { width: 2px; height: 24px; border-radius: 2px; background: rgba(75,47,39,.28); }
   #time-chip.low { color: var(--bad); animation: pulse .6s infinite alternate; }
   @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
-  #hud-sub { display: flex; gap: 6px; }
-  #hud-sub .chip { font-size: 12px; padding: 3px 10px; border-width: 2px; font-weight: 700; }
-  #buff-chip, #event-chip { position: absolute; left: 50%; transform: translateX(-50%); top: 12px; font-size: 14px; }
-  #event-chip { top: 52px; background: rgba(150,35,20,.94); color: #fff4d0; border-color: #ffb02e; }
+  #hud-sub { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 750; white-space: nowrap; }
+  #round-chip { font-weight: 900; }
+  #rage-chip { color: #b72828; font-weight: 900; }
+  .hud-separator { color: rgba(75,47,39,.42); font-weight: 900; }
 
   #orders {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
-    display: flex; gap: 10px; max-width: min(72vw, 640px); justify-content: center; flex-wrap: wrap;
+    display: flex; gap: 10px; max-width: min(72vw, 640px); justify-content: center; flex-wrap: nowrap; overflow: hidden;
   }
   .order-card {
-    background: var(--paper); border: 3px solid var(--ink); border-radius: 14px;
-    padding: 7px 11px 8px; min-width: 108px; box-shadow: 0 3px 0 rgba(0,0,0,.35);
+    background: rgb(255 248 236 / var(--hud-surface-alpha)); border: 3px solid var(--ink); border-radius: 14px;
+    padding: 4px 8px 6px; min-width: 108px; box-shadow: 0 3px 0 rgba(0,0,0,.35);
     animation: pop-in .18s ease-out;
   }
   @keyframes pop-in { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-  .order-card .o-name { font-weight: 800; font-size: 14px; white-space: nowrap; }
-  .order-card .o-dots { display: flex; gap: 4px; margin: 4px 0 5px; }
+  .order-card .o-dots { display: flex; align-items: center; gap: 4px; margin: 0; }
   .order-card .o-dots i {
-    width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(0,0,0,.38);
+    width: 24px; height: 22px;
     display: grid; place-items: center; color: #fff; font-size: 11px; font-style: normal; font-weight: 900;
     line-height: 1; text-shadow: 0 1px 1px rgba(0,0,0,.95), 1px 0 1px rgba(0,0,0,.7), -1px 0 1px rgba(0,0,0,.7);
-    position: relative; background: var(--ingredient, #999);
+    position: relative; isolation: isolate;
   }
-  .order-card .o-dots i.chopped {
-    background: conic-gradient(
-      var(--ingredient) 0 31%, #fff8ec 31% 35%,
-      var(--ingredient) 35% 64%, #fff8ec 64% 68%,
-      var(--ingredient) 68% 97%, #fff8ec 97% 100%
-    );
+  .order-card .o-dots i::before, .order-card .o-dots i::after {
+    content: ''; position: absolute; inset-block: 0; z-index: -1;
+    background: var(--ingredient, #999); border: 2px solid rgba(38,23,18,.62);
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,.12), 0 1px 1px rgba(0,0,0,.2);
   }
-  .order-card .o-bar { height: 7px; border-radius: 4px; background: #e0d5c2; overflow: hidden; }
-  .order-card .o-bar i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
+  .order-card .o-dots i.whole::before { inset-inline: 1px; border-radius: 50%; }
+  .order-card .o-dots i.whole::after { display: none; }
+  .order-card .o-dots i.chopped::before, .order-card .o-dots i.chopped::after {
+    inset: 1px; border: 0; border-radius: 50%;
+    filter: drop-shadow(0 0 1.2px rgba(38,23,18,.95));
+  }
+  .order-card .o-dots i.chopped::before {
+    clip-path: polygon(0 0, 65% 0, 25% 100%, 0 100%);
+    transform: translate(-1px, -1px);
+  }
+  .order-card .o-dots i.chopped::after {
+    clip-path: polygon(75% 0, 100% 0, 100% 100%, 35% 100%);
+    transform: translate(1px, 1px);
+  }
+  .order-card .o-dots i span { position: relative; z-index: 1; transform: translateY(.25px); }
+  .order-card .o-bar { position: absolute; inset: auto 0 0; height: 4px; background: rgba(185,171,148,.72); overflow: hidden; }
+  .order-card .o-bar i { display: block; height: 100%; background: var(--good); }
   .order-card.urgent { border-color: var(--bad); }
   .order-card.urgent .o-bar i { background: var(--bad); }
+
+  #hud-status {
+    position: absolute; top: calc(70px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: min(72vw, 640px);
+  }
+  #hud-status .chip { position: static; transform: none; padding: 3px 9px; border-width: 2px; border-radius: 10px; font-size: 12px; line-height: 1.25; }
+  #event-chip { background: rgb(150 35 20 / var(--hud-surface-alpha)); color: #fff4d0; border-color: #ffb02e; }
 
   #carry-chip {
     position: absolute; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
@@ -92,9 +121,9 @@
   #audio-toggle {
     position: absolute; z-index: 20;
     top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
-    width: 44px; height: 44px; padding: 0; border: 3px solid var(--ink); border-radius: 14px;
-    background: rgba(255, 248, 236, .94); box-shadow: 0 3px 0 rgba(0,0,0,.35);
-    color: var(--ink); font-size: 21px; cursor: pointer; pointer-events: auto;
+    width: 38px; height: 38px; padding: 0; border: 3px solid var(--ink); border-radius: 12px;
+    background: rgb(255 248 236 / var(--hud-surface-alpha)); box-shadow: 0 3px 0 rgba(0,0,0,.35);
+    color: var(--ink); font-size: 18px; cursor: pointer; pointer-events: auto;
   }
   #audio-toggle:hover { transform: translateY(-2px); }
   #audio-toggle:active { transform: translateY(1px); box-shadow: 0 2px 0 rgba(0,0,0,.35); }
@@ -182,13 +211,17 @@
   .result-comment.rare { border-color: #f2a900; background: linear-gradient(120deg, #fff4ae, #ffd7a8, #fff4ae); }
   .result-comment strong { display: block; font-size: 18px; line-height: 1.25; }
   .result-comment span { display: block; margin-top: 3px; color: #825b45; font-size: 12px; font-weight: 700; line-height: 1.3; }
-  #awards-hud { position: absolute; top: 72px; left: 14px; width: min(330px, 43vw); pointer-events: none; }
-  #awards-hud .panel { padding: 16px; gap: 9px; align-items: stretch; }
-  #awards-actions { position: absolute; left: 14px; bottom: 18px; display: flex; gap: 9px; pointer-events: auto; }
+  #awards-hud { position: absolute; z-index: 30; top: 10px; left: 10px; width: min(310px, 42vw); max-height: calc(100vh - 150px); overflow-y: auto; pointer-events: auto; touch-action: pan-y; }
+  #awards-hud .panel { padding: 12px; gap: 7px; align-items: stretch; }
+  #awards-hud .panel h2 { font-size: 21px; }
+  #awards-actions { display: flex; gap: 7px; pointer-events: auto; }
+  #awards-actions .big-btn, #awards-actions .ghost-btn { flex: 1; padding: 8px 10px; font-size: 13px; letter-spacing: 0; white-space: nowrap; }
+  #award-note { color: #8d6e63; text-align: center; text-shadow: none; }
   #mode-cards { display: flex; gap: 12px; }
 
   /* ---------- 触屏控件 ---------- */
   #touch-ui { position: absolute; inset: 0; pointer-events: none; }
+  #touch-ui.movement-only #touch-btns { display: none; }
   #touch-zone {
     position: absolute; inset: 0 50% 0 0; pointer-events: auto; touch-action: none;
     --safe-left: env(safe-area-inset-left, 0px); --safe-top: env(safe-area-inset-top, 0px);
@@ -263,19 +296,20 @@
     border-color: #4b2f27;
     box-shadow: 0 4px 0 rgba(38,23,18,.42), inset 0 1px 0 rgba(255,255,255,.7);
   }
-  .chip { background: linear-gradient(160deg, rgba(255,253,244,.97), rgba(255,232,190,.95)); }
-  #score-chip { background: linear-gradient(160deg, #fff5bd, #ffd56d); }
+  .chip { background: linear-gradient(160deg, rgb(255 253 244 / var(--hud-surface-alpha)), rgb(255 232 190 / var(--hud-surface-alpha))); backdrop-filter: blur(2px); }
   .order-card {
-    position: relative; overflow: hidden; padding: 7px 11px 9px;
-    background: linear-gradient(145deg, #fffdf3 0 70%, #f4e3c6 100%);
+    position: relative; overflow: hidden;
+    background: linear-gradient(145deg, rgb(255 253 243 / var(--hud-surface-alpha)) 0 70%, rgb(244 227 198 / var(--hud-surface-alpha)) 100%);
+    backdrop-filter: blur(2px);
   }
-  .order-card::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: #f6a33c; }
-  .o-head { display: flex; align-items: center; gap: 7px; }
-  .o-type { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 9px; background: #ffe1a6; font-size: 16px; }
-  .order-card .o-name { display: flex; flex-direction: column; line-height: 1.05; }
-  .order-card .o-name small { color: #a1603d; font-size: 10px; margin-top: 3px; }
-  .order-card .o-dots i { width: 20px; height: 20px; box-shadow: inset -2px -2px 0 rgba(0,0,0,.12); }
-  .order-card.urgent { animation: order-shake .55s ease-in-out infinite alternate; background: #fff0e9; }
+  .order-card::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: #f6a33c; }
+  .o-main { display: flex; align-items: center; gap: 5px; }
+  .o-type { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; background: #ffe1a6; font-size: 17px; }
+  .o-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 1px; line-height: 1; white-space: nowrap; }
+  .order-card .o-name { overflow: hidden; color: #704633; font-size: 10px; font-weight: 800; text-overflow: ellipsis; }
+  .order-card .o-points { flex: none; color: #a1603d; font-size: 9px; font-weight: 800; }
+  .order-card .o-dots i { width: 22px; height: 20px; }
+  .order-card.urgent { animation: order-shake .55s ease-in-out infinite alternate; background: rgb(255 240 233 / var(--hud-surface-alpha)); }
   @keyframes order-shake { from { transform: rotate(-.5deg); } to { transform: rotate(.5deg) scale(1.015); } }
   .overlay { background: radial-gradient(circle at 50% 30%, rgba(113,77,55,.5), rgba(26,18,25,.9)); }
   .panel {
@@ -299,20 +333,32 @@
   .theme-ring .m-preview i { background: #77d9c9; border-color: #ff7b72; }
   .map-card .m-theme { display: inline-block; margin-top: 3px; padding: 2px 7px; border-radius: 999px; background: #f1dfc5; color: #815538; font-size: 10px; font-weight: 900; }
   .big-btn { background: linear-gradient(#ff875e, #ed5938); box-shadow: 0 6px 0 #963d2b; }
-  #carry-chip { background: linear-gradient(150deg, #fffbdc, #ffd875); }
+  #carry-chip { background: linear-gradient(150deg, rgb(255 251 220 / var(--hud-surface-alpha)), rgb(255 216 117 / var(--hud-surface-alpha))); }
   @media (max-width: 680px), (max-height: 560px) {
     .panel { padding: 16px; gap: 9px; }
     .map-card { width: 138px; }
     .m-preview { height: 46px; }
     .map-card .m-desc { display: none; }
-    #orders { top: calc(7px + env(safe-area-inset-top, 0px)); gap: 5px; max-width: 68vw; flex-wrap: nowrap; overflow: hidden; }
-    .order-card { min-width: 92px; padding: 5px 7px 7px; }
-    .order-card .o-name { font-size: 11px; } .o-type { width: 22px; height: 22px; font-size: 13px; }
+    #hud-tl { top: calc(7px + env(safe-area-inset-top, 0px)); left: calc(7px + env(safe-area-inset-left, 0px)); padding: 5px 7px 4px; gap: 3px; }
+    #hud-primary { gap: 7px; } #time-chip { font-size: 17px; } #score-chip { font-size: 16px; } .hud-divider { height: 20px; }
+    #hud-sub { gap: 3px; font-size: 9px; }
+    #orders {
+      top: calc(7px + env(safe-area-inset-top, 0px));
+      left: calc(170px + env(safe-area-inset-left, 0px)); right: calc(42px + env(safe-area-inset-right, 0px));
+      transform: none; gap: 5px; max-width: none;
+    }
+    .order-card { min-width: 92px; padding: 3px 6px 5px; }
+    .o-main { gap: 4px; } .order-card .o-name { font-size: 8px; } .order-card .o-points { font-size: 8px; } .o-type { width: 24px; height: 24px; font-size: 14px; }
     .order-card .o-dots { gap: 2px; }
-    .order-card .o-dots i { width: 18px; height: 18px; font-size: 10px; }
-    #awards-hud { top: 48px; left: 10px; width: calc(100vw - 20px); max-height: calc(100vh - 138px); overflow-y: auto; }
-    #awards-actions { left: 50%; transform: translateX(-50%); bottom: 12px; white-space: nowrap; }
-    #awards-actions .big-btn, #awards-actions .ghost-btn { padding: 9px 16px; font-size: 14px; }
+    .order-card .o-dots i { width: 20px; height: 18px; font-size: 10px; }
+    #hud-status {
+      top: calc(62px + env(safe-area-inset-top, 0px));
+      left: calc(170px + env(safe-area-inset-left, 0px)); right: calc(42px + env(safe-area-inset-right, 0px));
+      transform: none; max-width: none;
+    }
+    #hud-status .chip { padding: 2px 7px; font-size: 10px; }
+    #audio-toggle { top: calc(7px + env(safe-area-inset-top, 0px)); right: calc(7px + env(safe-area-inset-right, 0px)); width: 34px; height: 34px; font-size: 16px; }
+    #awards-hud { top: 8px; left: 8px; width: min(270px, 58vw); max-height: calc(100vh - 150px); }
     .result-comment strong { font-size: 16px; }
     #hint { display: none; }
   }
@@ -325,19 +371,26 @@
 
   <div id="hud" class="hidden">
     <div id="hud-tl">
-      <span class="chip" id="time-chip">⏱ <b id="time-val">3:00</b></span>
-      <span class="chip" id="score-chip">⭐ <b id="score-val">0</b></span>
-      <span class="chip" id="round-chip">🎯 <b id="round-val">1/3</b></span>
-      <span class="chip hidden" id="rage-chip">😡 <b id="rage-val">0/100</b></span>
+      <div id="hud-primary">
+        <span id="time-chip">⏱ <b id="time-val">3:00</b></span>
+        <i class="hud-divider" aria-hidden="true"></i>
+        <span id="score-chip">⭐ <b id="score-val">0</b></span>
+      </div>
       <div id="hud-sub">
-        <span class="chip">上菜 <b id="served-val">0</b></span>
-        <span class="chip">超时 <b id="expired-val">0</b></span>
+        <span id="round-chip">🎯 <b id="round-val">1/3</b></span>
+        <i class="hud-separator" aria-hidden="true">·</i>
+        <span>上菜 <b id="served-val">0</b></span>
+        <i class="hud-separator" aria-hidden="true">·</i>
+        <span>超时 <b id="expired-val">0</b></span>
+        <span class="hidden" id="rage-chip">😡 <b id="rage-val">0/100</b></span>
       </div>
     </div>
     <div id="orders"></div>
+    <div id="hud-status">
+      <span class="chip hidden" id="buff-chip"></span>
+      <span class="chip hidden" id="event-chip"></span>
+    </div>
     <span class="chip hidden" id="carry-chip"></span>
-    <span class="chip hidden" id="buff-chip"></span>
-    <span class="chip hidden" id="event-chip"></span>
     <div id="hint"></div>
   </div>
 
@@ -358,8 +411,7 @@
     <div class="panel"><h2 id="round-title">🍽️ 本局结束</h2><div id="round-comment" class="result-comment hidden"></div><div id="round-board"></div><div class="note" id="round-next"></div></div>
   </div>
 
-  <div id="awards-hud" class="hidden"><div class="panel"><h2>🏆 派对排行榜</h2><div id="award-total"></div><div id="final-comment" class="result-comment hidden"></div><div id="award-board"></div></div></div>
-  <div id="awards-actions" class="hidden"><button class="big-btn" id="award-rematch-btn">再来一场</button><button class="ghost-btn" id="award-lobby-btn">返回大厅</button></div>
+  <div id="awards-hud" class="hidden"><div class="panel"><h2>🏆 派对排行榜</h2><div id="award-total"></div><div id="final-comment" class="result-comment hidden"></div><div id="award-board"></div><div id="awards-actions" class="hidden"><button class="big-btn" id="award-rematch-btn">再来一场</button><button class="ghost-btn" id="award-lobby-btn">返回大厅</button></div><div id="award-note" class="note hidden">等待房主选择下一步…</div></div></div>
 
   <div id="ended" class="overlay hidden">
     <div class="panel">

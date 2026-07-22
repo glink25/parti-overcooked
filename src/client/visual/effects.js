@@ -60,11 +60,18 @@ export function createEffectSystem(scene, tier) {
     emit(kind, position, { count: tier === 'low' ? 5 : 9, color, spread: 0.25, outward: 1.5, rise: 1.25, life: 0.9, size: 1.2 });
   }
 
+  function clear() {
+    for (const p of pool) {
+      p.life = 0;
+      p.mesh.visible = false;
+    }
+  }
+
   function dispose() {
     for (const p of pool) scene.remove(p.mesh);
     geometry.dispose();
     for (const effectMaterial of materials.values()) effectMaterial.dispose();
     materials.clear();
   }
-  return { emit, burst, update, dispose };
+  return { emit, burst, update, clear, dispose };
 }

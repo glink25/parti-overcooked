@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createMapEdgeGroup, createSceneStageGroup } from './map-edges.js';
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const smoothstep = (value) => {
@@ -101,10 +102,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   }
 
   function buildGarden(parent, w, h) {
-    const lawn = box(w + 4.5, 0.16, h + 4.2, 0x75c95d, { kind: 'noise', accent: 0xa7de78 });
-    lawn.position.set(w / 2, -0.2, h / 2); lawn.castShadow = false; lawn.receiveShadow = true; parent.add(lawn);
-    const patio = box(w + 2.2, 0.12, h + 2, 0xf5c97f, { kind: 'tile', accent: 0xd99c5c });
-    patio.position.set(w / 2, -0.11, h / 2); patio.castShadow = false; patio.receiveShadow = true; parent.add(patio);
     addBunting(parent, w, -0.65);
     addFlowerBed(parent, 2, -0.82, 2.2); addFlowerBed(parent, w - 2, -0.82, 2.2);
     addTree(parent, -1.2, 1); addTree(parent, w + 1.2, h - 1);
@@ -135,8 +132,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
 
   function buildFactory(parent, layout) {
     const { w, h } = layout;
-    const slab = box(w + 4.2, 0.16, h + 4, 0xb9eee2, { kind: 'tile', accent: 0x79cfc7 });
-    slab.position.set(w / 2, -0.2, h / 2); slab.castShadow = false; slab.receiveShadow = true; parent.add(slab);
     const colors = [0xff7f73, 0xffd34f, 0x52cdb8, 0x8ea9f3];
     for (const side of [-1, 1]) {
       const x = side < 0 ? -0.72 : w + 0.72;
@@ -176,13 +171,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   }
 
   function buildIsland(parent, w, h) {
-    water = new THREE.Mesh(new THREE.PlaneGeometry(90, 90, qualityTier === 'low' ? 1 : 12, qualityTier === 'low' ? 1 : 12), mat(0x35c8df, {
-      roughness: 0.28, metalness: 0.08, transparent: true, opacity: 0.94, emissive: 0x149bb8, emissiveIntensity: 0.16,
-    }));
-    water.rotation.x = -Math.PI / 2; water.position.set(w / 2, -0.38, h / 2); water.receiveShadow = true; parent.add(water);
-    if (qualityTier !== 'low') waterPositions = water.geometry.attributes.position;
-    const sand = box(w + 3.6, 0.15, h + 3.5, 0xffdf91, { kind: 'noise', accent: 0xf3bd6f }); sand.position.set(w / 2, -0.21, h / 2); parent.add(sand);
-    const deck = box(w + 2.1, 0.16, h + 2, 0xe7b870, { kind: 'wood', accent: 0xa86d47 }); deck.position.set(w / 2, -0.11, h / 2); parent.add(deck);
     addTree(parent, -1.15, 1.1, true); addTree(parent, w + 1.15, h - 1, true);
     addUmbrella(parent, -1.05, h - 1.2, 0xff6680); addUmbrella(parent, w + 1.05, 1.2, 0x5bc9ed);
     addSailboat(parent, -3.4, -1.6, 0xff6680, 0); if (qualityTier !== 'low') addSailboat(parent, w + 2.8, h + 1.8, 0xffd449, 2.4);
@@ -206,7 +194,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   function buildSnow(parent, layout) {
     parent.userData.landmarks = ['mountains', 'food-truck', 'snow-pines', 'snowfall'];
     const { w, h } = layout;
-    const snow = box(w + 5, 0.2, h + 4.8, 0xeaf7ff, { kind: 'noise', accent: 0xc6e5f4 }); snow.position.set(w / 2, -0.22, h / 2); snow.receiveShadow = true; parent.add(snow);
     for (let i = 0; i < 5; i++) {
       const mountain = new THREE.Mesh(new THREE.ConeGeometry(2.2 + i * 0.24, 4.2 + i * 0.3, 5), mat(i % 2 ? 0x91b4c7 : 0x789eb3, { kind: 'noise', accent: 0xeaf8ff }));
       mountain.position.set(-5 + i * 6.2, 1.45, -5.8 - (i % 2) * 1.4); parent.add(mountain);
@@ -228,7 +215,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   function buildSpace(parent, layout) {
     parent.userData.landmarks = ['starfield', 'ringed-planet', 'station-hull', 'isolation-chamber'];
     const { w, h } = layout;
-    const hull = box(w + 3.8, 0.2, h + 3.5, 0x6878a7, { kind: 'metal', accent: 0x91a8ce }); hull.position.set(w / 2, -0.22, h / 2); hull.receiveShadow = true; parent.add(hull);
     const horizon = new THREE.Mesh(new THREE.TorusGeometry(Math.max(w, h) * 0.72, 0.1, 8, 48), mat(0x55e6ef, { emissive: 0x55e6ef, emissiveIntensity: 0.8 })); horizon.rotation.x = Math.PI / 2; horizon.position.set(w / 2, -0.05, h / 2); parent.add(horizon);
     const planet = sph(2.25, 0x7359b8, 18, 12); planet.material = mat(0x7359b8, { emissive: 0x2d235f, emissiveIntensity: 0.4 }); planet.position.set(w + 7, 4.8, -9); parent.add(planet);
     const planetRing = new THREE.Mesh(new THREE.TorusGeometry(3.05, 0.16, 8, 36), mat(0xd78cff, { emissive: 0x7d43b1, emissiveIntensity: 0.4 })); planetRing.position.copy(planet.position); planetRing.rotation.set(1.1, 0.2, 0.35); parent.add(planetRing); rotors.push({ object: planetRing, speed: 0.035 });
@@ -252,8 +238,6 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
   function buildCastle(parent, layout) {
     parent.userData.landmarks = ['towers', 'battlements', 'royal-banners', 'torches'];
     const { w, h } = layout;
-    const yard = box(w + 4.2, 0.2, h + 4, 0x75815f, { kind: 'noise', accent: 0x9aa079 }); yard.position.set(w / 2, -0.22, h / 2); yard.receiveShadow = true; parent.add(yard);
-    const stone = box(w + 2.4, 0.12, h + 2.2, 0xa9977c, { kind: 'tile', accent: 0x6f6254 }); stone.position.set(w / 2, -0.1, h / 2); parent.add(stone);
     addCastleTower(parent, -1, 0); addCastleTower(parent, w + 1, 0); addCastleTower(parent, -1, h); addCastleTower(parent, w + 1, h);
     const backWall = box(w + 2, 1.65, 0.42, 0x847568, { kind: 'noise', accent: 0xb09c82 }); backWall.position.set(w / 2, 0.65, h + 1.05); parent.add(backWall);
     for (let x = 0; x <= w; x += 1.2) { const merlon = box(0.55, 0.48, 0.5, 0xb09c82); merlon.position.set(x, 1.62, h + 1.05); parent.add(merlon); }
@@ -276,6 +260,15 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
     const cloudCount = theme.decor === 'space' ? 0 : (qualityTier === 'low' ? 3 : 6);
     group.userData.cloudCount = cloudCount;
     for (let i = 0; i < cloudCount; i++) clouds.push(addCloud(group, -7 + i * 5.6, 3.35 + (i % 2) * 0.75, -4.2 - (i % 3) * 1.25, 0.82 + (i % 3) * 0.18, cloudMaterial));
+    const stageGroup = createSceneStageGroup(layout, theme.stageProfile, mat);
+    group.add(stageGroup);
+    group.userData.stageProfileId = theme.stageProfile?.id || null;
+    if (theme.stageProfile?.water) {
+      water = stageGroup.userData.surfaceMeshes[0] || null;
+      waterPositions = null;
+    }
+    group.add(createMapEdgeGroup(layout, theme.edgeProfile, mat));
+    group.userData.edgeProfileId = theme.edgeProfile?.id || null;
     if (theme.decor === 'garden') buildGarden(group, layout.w, layout.h);
     else if (theme.decor === 'factory') buildFactory(group, layout);
     else if (theme.decor === 'island') buildIsland(group, layout.w, layout.h);
@@ -319,8 +312,8 @@ export function createEnvironmentController({ scene, hemi, sun, mat, box, cyl, s
       else if (mover.kind === 'torch') mover.object.scale.setScalar(0.88 + Math.sin(elapsed * 8 + mover.phase) * 0.14);
     });
     if (water) {
-      water.position.y = -0.38 + Math.sin(elapsed * 0.72) * 0.018;
-      water.rotation.z = Math.sin(elapsed * 0.2) * 0.008;
+      water.position.y = (water.userData.baseY ?? -0.38) + Math.sin(elapsed * 0.72) * 0.018;
+      if (!water.userData.stageSurface) water.rotation.z = Math.sin(elapsed * 0.2) * 0.008;
       if (waterPositions) {
         for (let i = 0; i < waterPositions.count; i++) {
           const x = waterPositions.getX(i); const y = waterPositions.getY(i);

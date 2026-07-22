@@ -1,6 +1,8 @@
 export const MAP_THEMES = {
   classic: {
     id: 'classic', label: '晴日花园市集', icon: '🌻', decor: 'garden', animationSpeed: 1,
+    edgeProfile: { id: 'rounded-garden', kind: 'roundedRect', outer: 0x65a84f, inner: 0xf1c47b, margin: 2.15, innerScale: 0.9, depth: 0.34 },
+    stageProfile: { id: 'garden-platter', kind: 'roundedStage', outer: 0x385b36, rim: 0xa7de78, surface: 0x75c95d, marginX: 3.8, marginZ: 3.4, surfaceScale: 0.93, depth: 0.56, material: 'noise' },
     sky: 0x72d4ff, fog: 0xc8efff, ground: 0x75c95d,
     floorA: 0xffd88d, floorB: 0xffefbd, grout: 0xd9a45f,
     wall: 0xf06d57, wallAlt: 0xff9b70, trim: 0x9c5139,
@@ -16,6 +18,8 @@ export const MAP_THEMES = {
   },
   split: {
     id: 'split', label: '彩色糖果工厂', icon: '🍬', decor: 'factory', animationSpeed: 1.12,
+    edgeProfile: { id: 'detached-islands', kind: 'platforms', outer: 0x4c9e91, inner: 0xb9eee2, margin: 0.38, innerScale: 0.86, depth: 0.46 },
+    stageProfile: { id: 'factory-gear-tray', kind: 'gearStage', outer: 0x285b5a, rim: 0xffc940, surface: 0xb9eee2, marginX: 3.1, marginZ: 3, surfaceScale: 0.94, depth: 0.62, material: 'tile' },
     sky: 0x91dcff, fog: 0xd6f6ff, ground: 0xb9eee2,
     floorA: 0xbceade, floorB: 0xffe7a8, grout: 0x6fc9bf,
     wall: 0x62cbbb, wallAlt: 0x8ce2d1, trim: 0xffc940,
@@ -31,6 +35,8 @@ export const MAP_THEMES = {
   },
   ring: {
     id: 'ring', label: '热带海岛餐吧', icon: '🏝️', decor: 'island', animationSpeed: 0.92,
+    edgeProfile: { id: 'oval-island', kind: 'ellipse', outer: 0xeab86a, inner: 0xffdf91, margin: 1.85, innerScale: 0.88, depth: 0.42 },
+    stageProfile: { id: 'lagoon-basin', kind: 'lagoonStage', outer: 0x166b86, rim: 0x79dfde, surface: 0x35c8df, marginX: 5.2, marginZ: 4.6, surfaceScale: 0.95, depth: 0.62, material: 'water', water: true },
     sky: 0x4dc9ff, fog: 0xc9f5ff, ground: 0x35c8df,
     floorA: 0x64d6cb, floorB: 0x9be6d8, grout: 0x38a9a6,
     wall: 0x4bbfc3, wallAlt: 0x7bdad0, trim: 0xf06f78,
@@ -48,6 +54,8 @@ export const MAP_THEMES = {
 
 MAP_THEMES.snow = {
   id: 'snow', label: '雪山餐车', icon: '❄️', decor: 'snow', animationSpeed: 0.78,
+  edgeProfile: { id: 'jagged-snow', kind: 'jagged', outer: 0x789eb3, inner: 0xeaf7ff, margin: 1.55, innerScale: 0.9, depth: 0.48 },
+  stageProfile: { id: 'ice-shelf', kind: 'iceShelfStage', outer: 0x566f7d, rim: 0xc6e5f4, surface: 0xeaf7ff, marginX: 7.2, marginBack: 7.4, marginFront: 3.2, surfaceScale: 0.94, depth: 0.68, material: 'noise' },
   sky: 0x8bd5f5, fog: 0xdceffa, ground: 0xeaf7ff, floorA: 0xd9f1ff, floorB: 0xffffff, grout: 0xaacde0,
   wall: 0x4f8fc9, wallAlt: 0x89c7ed, trim: 0xeaf8ff, cabinet: 0x547fa7, cabinetDark: 0x34546f,
   counterTop: 0xeefaff, metal: 0xb9d4df, accent: 0xffa43d, target: 0x78ddff,
@@ -60,6 +68,8 @@ MAP_THEMES.snow = {
 };
 MAP_THEMES.space = {
   id: 'space', label: '星际厨房', icon: '🚀', decor: 'space', animationSpeed: 0.55,
+  edgeProfile: { id: 'modular-u-hull', kind: 'uHull', outer: 0x3d496e, inner: 0x6878a7, margin: 1.2, innerScale: 0.91, depth: 0.5, glow: 0x55e6ef },
+  stageProfile: { id: 'orbital-hex-deck', kind: 'hexStage', outer: 0x252c50, rim: 0x55e6ef, surface: 0x4a587f, marginX: 4, marginZ: 3.4, surfaceScale: 0.94, depth: 0.66, material: 'metal', glow: true },
   sky: 0x202653, fog: 0x6576a0, ground: 0x7783a8, floorA: 0x7788b5, floorB: 0xa5b2d0, grout: 0x4c587d,
   wall: 0x6878a7, wallAlt: 0x91a8ce, trim: 0x62edf2, cabinet: 0x6476a5, cabinetDark: 0x3d4d79,
   counterTop: 0xd1edf2, metal: 0xaebdca, accent: 0xe877e9, target: 0x62f2e8,
@@ -72,6 +82,8 @@ MAP_THEMES.space = {
 };
 MAP_THEMES.castle = {
   id: 'castle', label: '皇家宴会厅', icon: '🏰', decor: 'castle', animationSpeed: 0.86,
+  edgeProfile: { id: 'battlement-cross', kind: 'battlementCross', outer: 0x5f554b, inner: 0xa9977c, margin: 1.1, innerScale: 0.88, depth: 0.5 },
+  stageProfile: { id: 'royal-shield-court', kind: 'shieldStage', outer: 0x40382f, rim: 0x847568, surface: 0x75815f, marginX: 3.8, marginZ: 3.4, surfaceScale: 0.93, depth: 0.7, material: 'noise' },
   sky: 0x82acd1, fog: 0xc8c2b2, ground: 0x63815a, floorA: 0xbba47b, floorB: 0xd8c59b, grout: 0x756653,
   wall: 0x847568, wallAlt: 0xb09c82, trim: 0x702f3b, cabinet: 0x68422f, cabinetDark: 0x39251f,
   counterTop: 0xcab88f, metal: 0xb99747, accent: 0xd7a83f, target: 0xffd65c,

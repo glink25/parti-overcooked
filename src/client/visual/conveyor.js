@@ -9,6 +9,38 @@ export function conveyorSegment(a, b) {
   return {length,centerX:(a.x+b.x)/2,centerZ:(a.z+b.z)/2,angle:Math.atan2(dx,dz),dx:dx/length,dz:dz/length};
 }
 
+export function conveyorPathMetrics(points) {
+  if (!Array.isArray(points) || points.length < 2) throw new Error('Conveyor path must contain at least two points');
+  const segments = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const segment = conveyorSegment(a, b);
+    segments.push({ ...segment, a, b, start: total, end: total + segment.length, index: index - 1 });
+    total += segment.length;
+  }
+  return { segments, total };
+}
+
+export function conveyorPointAtDistance(points, distance, { loop = false, metrics = null } = {}) {
+  const pathMetrics = metrics || conveyorPathMetrics(points);
+  const finiteDistance = Number.isFinite(distance) ? distance : 0;
+  const sampledDistance = loop
+    ? ((finiteDistance % pathMetrics.total) + pathMetrics.total) % pathMetrics.total
+    : Math.max(0, Math.min(pathMetrics.total, finiteDistance));
+  const segment = pathMetrics.segments.find((entry) => sampledDistance <= entry.end + 1e-9) || pathMetrics.segments.at(-1);
+  const travelled = Math.max(0, Math.min(segment.length, sampledDistance - segment.start));
+  return {
+    x: segment.a.x + segment.dx * travelled,
+    z: segment.a.z + segment.dz * travelled,
+    dx: segment.dx,
+    dz: segment.dz,
+    distance: sampledDistance,
+    segmentIndex: segment.index,
+  };
+}
+
 export function conveyorPathRects(points,width=.8,origin={x:0,z:0}){
   const rects=[],half=width/2;
   for(let index=1;index<points.length;index++){
