@@ -9,6 +9,30 @@ const definition=loadWorker(path.join(root,'src/worker/index.js'));
 function classic(){for(let seed=1;seed<400;seed++){const ctx=makeContext(definition,seed);join(ctx,definition);startPlaying(ctx,definition);if(ctx.state.mapId==='classic')return ctx;}throw new Error('classic seed');}
 function finishParty(ctx){for(let round=1;round<=3;round++){ctx.state.timeLeft=.05;pump(ctx,1);if(round===3)break;ctx.state.roundResultTime=.05;pump(ctx,1);ctx.state.countdown=.05;pump(ctx,1);}return ctx.state;}
 
+test('倒计时结束时立即生成 95 秒首单并使用放宽后的间隔',()=>{
+  const ctx=makeContext(definition,17);join(ctx,definition);action(ctx,definition,'host','start');
+  assert.equal(ctx.state.phase,'countdown');assert.equal(ctx.state.orders.length,0);
+  while(ctx.state.phase==='countdown'){pump(ctx,1);if(ctx.state.phase==='countdown')assert.equal(ctx.state.orders.length,0);}
+  assert.equal(ctx.state.phase,'playing');assert.equal(ctx.state.orders.length,1);assert.equal(ctx.state.orders[0].t,95);assert.equal(ctx.state.orders[0].total,95);assert.ok(ctx.state.nextOrderIn>=25&&ctx.state.nextOrderIn<=35);
+});
+
+test('四人局订单间隔继续应用人数压力系数',()=>{
+  const ctx=makeContext(definition,19);join(ctx,definition);join(ctx,definition,'p3');join(ctx,definition,'p4');const state=startPlaying(ctx,definition);
+  assert.equal(state.orders.length,1);assert.ok(state.nextOrderIn>=25*.72&&state.nextOrderIn<=35*.72);
+});
+
+test('交付唯一订单后立即补单并重置生成间隔',()=>{
+  const ctx=classic(),state=ctx.state,p=state.players.host,window=state.layout.stations.find((entry)=>entry.id==='window');
+  state.orders=[{id:'only',key:'tomato:chopped',name:'测试菜',points:20,t:80,total:95}];state.nextOrderIn=.01;p.carrying={k:'dish',items:[{ingredient:'tomato',prep:'chopped'}],credits:[]};faceStation(state,p,window);
+  action(ctx,definition,'host','interact',{phase:'start',seq:1});action(ctx,definition,'host','interact',{phase:'release',seq:1});
+  assert.equal(state.served,1);assert.equal(state.orders.length,1);assert.notEqual(state.orders[0].id,'only');assert.equal(state.orders[0].total,95);assert.ok(state.nextOrderIn>=25&&state.nextOrderIn<=35);
+});
+
+test('唯一订单超时后立即补单并保留超时惩罚',()=>{
+  const ctx=makeContext(definition,37);join(ctx,definition);const state=startPlaying(ctx,definition);state.score=20;state.sessionScore=20;state.roundScore=20;state.nextOrderIn=100;state.orders=[{id:'doomed',key:'none',name:'测试订单',points:20,t:.05,total:95}];pump(ctx,1);
+  assert.equal(state.phase,'playing');assert.equal(state.expired,1);assert.equal(state.score,15);assert.equal(state.orders.length,1);assert.notEqual(state.orders[0].id,'doomed');assert.equal(state.orders[0].total,95);assert.ok(state.nextOrderIn>=25&&state.nextOrderIn<=35);
+});
+
 test('新世界模型中可完成取菜、切菜、烹饪、装盘与上菜',()=>{
   const ctx=classic(),state=ctx.state,p=state.players.host;
   const tomato=state.layout.stations.find((entry)=>entry.id==='tomato'),board=state.layout.stations.find((entry)=>entry.id==='board_a'),stove=state.layout.stations.find((entry)=>entry.id==='stove_a');
@@ -26,7 +50,7 @@ test('新世界模型中可完成取菜、切菜、烹饪、装盘与上菜',()=
   const plates=state.layout.stations.find((entry)=>entry.id==='plates');faceStation(state,p,plates);press();assert.equal(p.carrying?.k,'plate');
   faceStation(state,p,stove);tap();assert.equal(p.carrying?.k,'dish');
   const window=state.layout.stations.find((entry)=>entry.id==='window');faceStation(state,p,window);tap();
-  assert.equal(state.orders.length,0);assert.equal(state.served,1);assert.ok(state.score>=20);
+  assert.equal(state.orders.length,1);assert.notEqual(state.orders[0].id,'manual');assert.equal(state.served,1);assert.ok(state.score>=20);
 });
 
 test('四人派对模式完成三轮换图并进入贡献结算',()=>{
@@ -73,7 +97,7 @@ test('房主可从结算大厅开始全新对局',()=>{
 test('无尽模式订单超时累积怒气并触发最终结算',()=>{
   const ctx=makeContext(definition,37);join(ctx,definition);action(ctx,definition,'host','selectMode',{mode:'endless'});startPlaying(ctx,definition);
   ctx.state.rage=75;ctx.state.orders=[{id:'doomed',key:'none',name:'测试订单',points:20,t:.05,total:80}];pump(ctx,1);
-  assert.equal(ctx.state.phase,'awards');assert.equal(ctx.state.expired,1);assert.ok(ctx.state.finalComment);
+  assert.equal(ctx.state.phase,'awards');assert.equal(ctx.state.expired,1);assert.equal(ctx.state.orders.length,0);assert.ok(ctx.state.finalComment);
 });
 
 test('烧糊清理、脏盘返回和洗碗使用新 action 协议',()=>{

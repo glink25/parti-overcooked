@@ -95,8 +95,8 @@ export function platformEdgeFootprints(platform, profile) {
   const margin = Number(profile.margin) || .35;
   const width = maxX - minX + margin * 2;
   const height = maxZ - minZ + margin * 2;
-  const radius = platform.id === 'ferry' ? Math.min(width, height) * .48 : Math.min(width, height) * .2;
-  return [roundedRectPoints(minX - margin, minZ - margin, width, height, radius, platform.id === 'ferry' ? 5 : 3)];
+  const radius = Math.min(width, height) * .2;
+  return [roundedRectPoints(minX - margin, minZ - margin, width, height, radius, 3)];
 }
 
 export function sceneStageFootprints(layout, profile) {

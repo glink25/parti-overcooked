@@ -28,9 +28,8 @@ const COOK_TIME = 12;                // 煮汤秒数
 const BURN_TIME = 12;                // 煮好后多少秒烧糊
 const DIRTY_DELAY = 8;               // 上菜后脏盘返回秒数
 const GAME_TIME = 180;               // 单局时长
-const ORDER_LIFE = 80;               // 订单存活秒数
-const ORDER_FIRST = 5;               // 开局后首单延迟
-const ORDER_MIN_GAP = 20;            // 订单间隔下限
+const ORDER_LIFE = 95;               // 订单存活秒数
+const ORDER_MIN_GAP = 25;            // 订单间隔下限
 const ORDER_VAR_GAP = 10;            // 订单间隔随机上浮
 const MAX_ORDERS = 4;                // 同时最多订单
 const COUNTDOWN_T = 3;               // 开局倒计时
@@ -292,32 +291,31 @@ const MAPS = {
     checkpoints: [{id:'garden',x:8.5,z:5.5}], spawns: [{slot:1,x:4.5,z:6.5},{slot:2,x:14.5,z:6.5},{slot:3,x:5.5,z:9.5},{slot:4,x:12.5,z:9.5}], camera:{minPixelsPerTile:44},
   },
   split: {
-    id:'split', name:'一线天', desc:'两座浮岛反相移动，渡台是唯一人员通路。', bounds:{w:22,h:14}, plateCount:4,
+    id:'split', name:'一线天', desc:'两座浮岛周期合并；分离时投掷交接，合并时安全换区。', bounds:{w:22,h:14}, plateCount:4,
     recipePool:['mushroom_soup','potato_soup','garden_salad','garden_stew','crisp_salad'],
     terrain: terrain(22,14,()=>false),
     platforms:[
-      {id:'west',origin:{x:2,z:2},tiles:rectTiles(6,9),motion:{axis:{x:0,z:1},amplitude:.8,period:16,phase:0,easing:'sine'}},
-      {id:'east',origin:{x:12,z:2},tiles:rectTiles(6,9),motion:{axis:{x:0,z:1},amplitude:.8,period:16,phase:0.5,easing:'sine'}},
-      {id:'ferry',origin:{x:9,z:6},tiles:rectTiles(2,2),motion:{axis:{x:1,z:0},amplitude:2,period:12,phase:0,easing:'sine'}},
+      {id:'west',origin:{x:2,z:2},tiles:rectTiles(6,9)},
+      {id:'east',origin:{x:12,z:2},tiles:rectTiles(6,9)},
     ],
     stations:[crate('tomato','tomato',0,1,{supportId:'west'}),crate('onion','onion',0,3,{supportId:'west'}),crate('lettuce','lettuce',0,5,{supportId:'west'}),crate('carrot','carrot',0,7,{supportId:'west'}),crate('mushroom','mushroom',2,0,{supportId:'west'}),crate('potato','potato',4,0,{supportId:'west'}),
       st('board_w','board',2,2,{supportId:'west'}),st('board_w2','board',4,2,{supportId:'west'}),st('sink','sink',2,8,{supportId:'west'}),st('trash','trash',0,8,{supportId:'west'}),st('counter_w','counter',5,4,{supportId:'west'}),
-      st('stove_a','stove',2,5,{supportId:'east'}),st('stove_b','stove',4,5,{supportId:'east'}),st('plates','plates',4,8,{supportId:'east'}),st('window','window',5,4,{supportId:'east'}),st('counter_e','counter',0,4,{supportId:'east'}),st('counter_e2','counter',2,8,{supportId:'east'})],
-    mechanisms:[{id:'islands',type:'movingPlatform',config:{platformIds:['west','east','ferry']}},{id:'river',type:'waterHazard',config:{}}],
+      st('stove_a','stove',2,5,{supportId:'east'}),st('stove_b','stove',4,5,{supportId:'east'}),st('plates','plates',4,8,{supportId:'east'}),st('window','window',5,4,{supportId:'east'}),st('counter_e','counter',0,4,{supportId:'east'}),st('counter_e2','counter',2,8,{supportId:'east'}),st('counter_e3','counter',5,7,{supportId:'east'})],
+    mechanisms:[{id:'islands',type:'movingPlatform',config:{mode:'dock',platformIds:['west','east'],cycle:24,separatedHold:8,mergeDuration:4,mergedHold:8,separateDuration:4,offsets:{west:{x:2,z:0},east:{x:-2,z:0}}}},{id:'river',type:'waterHazard',config:{}}],
     checkpoints:[{id:'west_safe',x:3.5,z:4.5,supportId:'west'},{id:'east_safe',x:3.5,z:4.5,supportId:'east'}],
     spawns:[{slot:1,x:3.5,z:4.5,supportId:'west'},{slot:2,x:3.5,z:4.5,supportId:'east'},{slot:3,x:4.5,z:7.5,supportId:'west'},{slot:4,x:1.5,z:7.5,supportId:'east'}],camera:{minPixelsPerTile:44},
   },
   ring: {
-    id:'ring',name:'环岛餐吧',desc:'外环切配、中央出餐，四个装卸口围绕换向循环带协作。',bounds:{w:21,h:17},plateCount:5,
+    id:'ring',name:'环岛餐吧',desc:'外环切配、中央出餐，东西双短线将食材送入可行走中央岛。',bounds:{w:21,h:17},plateCount:5,
     recipePool:['tomato_soup','onion_soup','carrot_soup','potato_soup','mushroom_soup','garden_stew','garden_salad','crisp_salad','deluxe_salad','rainbow_salad'],
     terrain:terrainWithWalls(21,17,(x,z)=>{const dx=(x-10)/9,dz=(z-8)/7;const outer=dx*dx+dz*dz<=1&&z<=14;const inner=(x-10)*(x-10)/25+(z-8)*(z-8)/16<=1;const center=x>=8&&x<=12&&z>=6&&z<=10;return outer&&(!inner||center)?'.':'~';},{empty:'~',openings:[{x:9,z:4},{x:10,z:4},{x:9,z:5},{x:10,z:5},{x:11,z:11},{x:12,z:11},{x:11,z:12},{x:12,z:12},{x:5,z:7},{x:6,z:7},{x:7,z:7},{x:5,z:8},{x:6,z:8},{x:7,z:8},{x:13,z:8},{x:14,z:8},{x:15,z:8},{x:13,z:9},{x:14,z:9},{x:15,z:9}]}),platforms:[],
     stations:[crate('tomato','tomato',2,6),crate('onion','onion',4,3),crate('mushroom','mushroom',8,2),crate('lettuce','lettuce',15,3),crate('cucumber','cucumber',18,6),crate('carrot','carrot',17,11),crate('potato','potato',10,14),
-      st('board_n','board',6,3),st('board_s','board',15,13),st('sink','sink',6,13),
-      conveyorPort('ring_in_w',4,8,'ring_belt','input',{x:8.5,z:8.5}),conveyorPort('ring_in_e',16,8,'ring_belt','input',{x:12.5,z:8.5}),
-      conveyorPort('ring_out_n',10,6,'ring_belt','output',{x:10.5,z:6.5}),conveyorPort('ring_out_s',10,10,'ring_belt','output',{x:10.5,z:10.5}),
-      st('stove_a','stove',9,7),st('trash','trash',10,7),st('stove_b','stove',11,7),st('plates','plates',9,9),st('stove_c','stove',10,9),st('window','window',11,9)],
-    mechanisms:[{id:'ring_belt',type:'conveyor',config:{path:path([{x:12.5,z:10.5},{x:8.5,z:10.5},{x:8.5,z:6.5},{x:12.5,z:6.5},{x:12.5,z:10.5}],1,{loop:true}),reverseEvery:20,warning:3}}],
-    hazardMarkers:[{x:10.5,z:4.5},{x:11.5,z:11.5},{x:6.5,z:7.5},{x:14.5,z:8.5}],
+      st('board_n','board',6,3),st('board_s','board',15,13),st('sink','sink',6,13),st('counter_outer_n','counter',7,3),st('counter_outer_s','counter',14,13),
+      conveyorPort('ring_in_w',4,8,'ring_belt_w','input',{x:5.5,z:8.5}),conveyorPort('ring_out_w',8,8,'ring_belt_w','output',{x:8.5,z:8.5}),
+      conveyorPort('ring_in_e',16,8,'ring_belt_e','input',{x:15.5,z:8.5}),conveyorPort('ring_out_e',12,8,'ring_belt_e','output',{x:12.5,z:8.5}),
+      st('stove_a','stove',9,7),st('trash','trash',10,7),st('stove_b','stove',11,7),st('counter_center_n','counter',8,6),st('plates','plates',9,9),st('stove_c','stove',10,9),st('window','window',11,9),st('counter_center_s','counter',12,10)],
+    mechanisms:[{id:'ring_belt_w',type:'conveyor',config:{path:path([{x:5.5,z:8.5},{x:8.5,z:8.5}],1)}},{id:'ring_belt_e',type:'conveyor',config:{path:path([{x:15.5,z:8.5},{x:12.5,z:8.5}],1)}}],
+    hazardMarkers:[{x:6.5,z:8.5},{x:14.5,z:8.5}],
     checkpoints:[{id:'outer',x:4.5,z:9.5},{id:'center',x:10.5,z:8.5}],spawns:[{slot:1,x:4.5,z:9.5},{slot:2,x:9.5,z:8.5},{slot:3,x:16.5,z:9.5},{slot:4,x:11.5,z:8.5}],camera:{minPixelsPerTile:44},
   },
   snow: {
@@ -326,7 +324,7 @@ const MAPS = {
     terrain:terrainWithWalls(23,14,(x,z)=>{const west=x>=1&&x<=6&&z>=2&&z<=8,east=x>=16&&x<=21&&z>=2&&z<=8,center=x>=8&&x<=14&&z>=4&&z<=12,iceBridge=(x===7||x===15)&&(z===4||z===5),stoneBridge=(x===7||x===15)&&(z===7||z===8);return west||east||center||iceBridge||stoneBridge?(iceBridge?'i':'.'):'~';},{empty:'~',openings:[{x:7,z:6},{x:15,z:6}]}),
     platforms:[],
     stations:[crate('potato','potato',1,3),crate('mushroom','mushroom',3,2),crate('cheese','cheese',5,2),crate('meat','meat',21,3),crate('onion','onion',19,2),crate('lettuce','lettuce',17,2),crate('tomato','tomato',21,6),
-      st('board_a','board',3,7),st('board_b','board',19,7),st('stove_a','stove',9,10),st('stove_b','stove',12,10),st('plates','plates',14,8),st('sink','sink',8,11),st('trash','trash',10,4),st('window','window',12,12),
+      st('board_a','board',3,7),st('board_b','board',19,7),st('stove_a','stove',9,10),st('stove_b','stove',12,10),st('plates','plates',14,8),st('sink','sink',8,11),st('trash','trash',10,4),st('window','window',12,12),st('counter_w1','counter',5,7),st('counter_w2','counter',5,8),st('counter_e1','counter',17,7),st('counter_center','counter',13,7),
       conveyorPort('lift_in',5,5,'ski_lift','input',{x:5.5,z:5.5}),conveyorPort('lift_out',14,5,'ski_lift','output',{x:14.5,z:5.5})],
     mechanisms:[{id:'ice',type:'iceSurface',config:{stopTime:0.65,turnTime:0.25}},{id:'ski_lift',type:'conveyor',config:{path:path([{x:5.5,z:5.5},{x:14.5,z:5.5}],1)}},{id:'ravine',type:'waterHazard',config:{}}],
     hazards:[
@@ -342,7 +340,7 @@ const MAPS = {
     platforms:[],
     stations:[crate('rice','rice',1,4),crate('onion','onion',1,6),crate('tomato','tomato',1,8),crate('cucumber','cucumber',1,10),st('board_w','board',4,4),st('sink','sink',4,10),conveyorPort('airlock_w',6,7,'airlock_w_belt','input',{x:6.5,z:7.5}),
       crate('mushroom','mushroom',22,4),crate('meat','meat',22,6),crate('lettuce','lettuce',22,8),crate('cheese','cheese',22,10),st('board_e','board',19,4),st('plates','plates',19,10),conveyorPort('airlock_e',17,7,'airlock_e_belt','input',{x:17.5,z:7.5}),
-      st('stove_a','stove',10,6),st('stove_b','stove',13,6),st('stove_c','stove',11,9),st('trash','trash',13,9),st('window','window',11,5),conveyorPort('counter_core_w',9,8,'airlock_w_belt','output',{x:9.5,z:8.5}),conveyorPort('counter_core_e',14,8,'airlock_e_belt','output',{x:14.5,z:8.5})],
+      st('stove_a','stove',10,6),st('stove_b','stove',13,6),st('stove_c','stove',11,9),st('trash','trash',13,9),st('window','window',11,5),st('counter_core_a','counter',9,9),st('counter_core_b','counter',14,9),st('counter_w','counter',5,9),st('counter_e','counter',18,9),conveyorPort('counter_core_w',9,8,'airlock_w_belt','output',{x:9.5,z:8.5}),conveyorPort('counter_core_e',14,8,'airlock_e_belt','output',{x:14.5,z:8.5})],
     mechanisms:[{id:'airlock_w_belt',type:'conveyor',config:{path:path([{x:6.5,z:7.5},{x:9.5,z:7.5},{x:9.5,z:8.5}],1)}},{id:'airlock_e_belt',type:'conveyor',config:{path:path([{x:17.5,z:7.5},{x:14.5,z:7.5},{x:14.5,z:8.5}],1)}},{id:'void',type:'waterHazard',config:{}}],
     checkpoints:[{id:'core',x:11.5,z:8.5},{id:'outer_link',x:11.5,z:12.5},{id:'west',x:4,z:7},{id:'east',x:20,z:7}],spawns:[{slot:1,x:4,z:7},{slot:2,x:11.5,z:8.5},{slot:3,x:20,z:7},{slot:4,x:5.5,z:10.5}],camera:{minPixelsPerTile:44},
   },
@@ -351,7 +349,7 @@ const MAPS = {
     recipePool:['garden_stew','deluxe_salad','meat_sauce_soup','cheese_potato_soup','golden_risotto','cheese_salad','party_platter'],
     terrain:terrainWithWalls(23,17,(x,z)=>{const hall=x>=9&&x<=13&&z>=6&&z<=10,north=x>=9&&x<=13&&z>=1&&z<=4,south=x>=9&&x<=13&&z>=12&&z<=15,west=x>=1&&x<=7&&z>=6&&z<=10,east=x>=15&&x<=21&&z>=6&&z<=10,necks=(z===5&&x>=10&&x<=12)||(z===11&&x>=10&&x<=12)||(x===8&&z>=7&&z<=9)||(x===14&&z>=7&&z<=9),ring=(x>=4&&x<=18&&(z===3||z===4||z===12||z===13))||((x===4||x===5||x===17||x===18)&&z>=3&&z<=13);return hall||north||south||west||east||necks||ring?'.':' ';}),platforms:[],
     stations:[crate('tomato','tomato',1,7),crate('onion','onion',1,9),crate('cheese','cheese',3,6),crate('rice','rice',9,2),crate('mushroom','mushroom',13,2),crate('meat','meat',19,6),crate('lettuce','lettuce',21,7),crate('cucumber','cucumber',21,9),crate('carrot','carrot',9,12),crate('potato','potato',13,12),
-      st('board_w','board',6,8),st('board_e','board',16,8),st('stove_a','stove',10,7),st('stove_b','stove',12,7),st('stove_c','stove',11,9),st('plates','plates',10,15),st('sink','sink',12,15),st('trash','trash',12,13),st('window','window',11,1),st('counter_w','counter',9,9),st('counter_e','counter',13,9)],
+      st('board_w','board',6,8),st('board_e','board',16,8),st('stove_a','stove',10,7),st('stove_b','stove',12,7),st('stove_c','stove',11,9),st('plates','plates',10,15),st('sink','sink',12,15),st('trash','trash',12,13),st('window','window',11,1),st('counter_w','counter',9,9),st('counter_e','counter',13,9),st('counter_n','counter',10,3),st('counter_s','counter',10,13)],
     mechanisms:[{id:'royal_gates',type:'gate',config:{groups:[
       {id:'north',label:'北门',orientation:'x',cells:[{x:10,z:5},{x:11,z:5},{x:12,z:5}]},
       {id:'east',label:'东门',orientation:'z',cells:[{x:14,z:7},{x:14,z:8},{x:14,z:9}]},
@@ -626,6 +624,8 @@ function tick(ctx) {
     if (s.countdown <= 0) {
       s.countdown = 0;
       s.phase = 'playing';
+      spawnOrder(ctx);
+      resetNextOrderIn(ctx);
       ctx.broadcast('game:start', {});
     }
   } else if (s.phase === 'playing') {
@@ -670,6 +670,14 @@ function spawnOrder(ctx) {
     total: ORDER_LIFE,
   });
   ctx.broadcast('order:new', { name: r.name });
+}
+
+function resetNextOrderIn(ctx) {
+  const s = ctx.state;
+  const pressure = Math.max(0.4, 1 - 0.15 * Math.max(0, s.difficultyLevel - 1));
+  const players = Math.max(2, Math.min(4, Object.keys(s.players).length));
+  const playerMultiplier = players === 4 ? 0.72 : players === 3 ? 0.85 : 1;
+  s.nextOrderIn = Math.max(8, (ORDER_MIN_GAP + ctx.random() * ORDER_VAR_GAP) * pressure * playerMultiplier);
 }
 
 function shuffleMaps(ctx, previous) {
@@ -837,7 +845,7 @@ function setupRound(ctx) {
   s.orderSeq = 0;
   s.plates = { clean: map.plateCount, dirty: 0, washT: 0, due: [], cleanCredits: [] };
   s.timeLeft = GAME_TIME;
-  s.nextOrderIn = ORDER_FIRST;
+  s.nextOrderIn = 0;
   s.groundBuff = null;
   s.nextBuffIn = 25;
   s.fireOverdriveRemaining = 0;
@@ -1019,15 +1027,37 @@ function startFall(ctx,id,p) {
   if(p.fall||p.respawnGrace>0)return;
   recycleContent(ctx.state,p.carrying); p.carrying=null; p.vx=p.vz=0;p.input={dx:0,dz:0};p.working=false;p.charge=null;p.fall={remaining:FALL_TIME};bumpStat(p,'falls');ctx.broadcast('player:fall',{id,name:p.name});
 }
-function stepPlatforms(s, platformIds) {
+function carryPlatformDelta(s, def, dx, dz) {
+  if(!dx&&!dz)return;
+  for(const p of Object.values(s.players))if(p.supportId===def.id&&!p.fall){p.x+=dx;p.z+=dz;}
+  for(const item of Object.values(s.worldItems))if(item.supportId===def.id&&item.mode!=='airborne'){item.x+=dx;item.z+=dz;}
+}
+function secureDockSeam(s, def, offset) {
+  const xs=def.tiles.map((tile)=>tile.x),minX=def.origin.x+offset.x+Math.min(...xs),maxX=def.origin.x+offset.x+Math.max(...xs)+1;
+  const margin=PLAYER_R+.02;
+  for(const p of Object.values(s.players))if(p.supportId===def.id&&!p.fall){p.x=Math.max(minX+margin,Math.min(maxX-margin,p.x));}
+  for(const item of Object.values(s.worldItems))if(item.supportId===def.id&&item.mode==='ground'){item.x=Math.max(minX+.08,Math.min(maxX-.08,item.x));}
+}
+function dockMotionAt(config,elapsed) {
+  const separatedEnd=config.separatedHold,mergeEnd=separatedEnd+config.mergeDuration,mergedEnd=mergeEnd+config.mergedHold;
+  const t=((elapsed%config.cycle)+config.cycle)%config.cycle;
+  if(t<separatedEnd)return{phase:'separated',remaining:separatedEnd-t,progress:0,merged:false};
+  if(t<mergeEnd){const linear=(t-separatedEnd)/config.mergeDuration;return{phase:'merging',remaining:mergeEnd-t,progress:(1-Math.cos(Math.PI*linear))/2,merged:false};}
+  if(t<mergedEnd)return{phase:'merged',remaining:mergedEnd-t,progress:1,merged:true};
+  const linear=(t-mergedEnd)/config.separateDuration;return{phase:'separating',remaining:config.cycle-t,progress:(1+Math.cos(Math.PI*linear))/2,merged:false};
+}
+function stepPlatforms(s, def, mechanismState) {
   const runtime=runtimeOf(s);
-  for(const def of s.layout.platforms.filter((entry)=>platformIds.includes(entry.id))){
-    const state=s.platforms[def.id];state.previousX=state.x;state.previousZ=state.z;
-    if(def.motion){const angle=((s.elapsed/def.motion.period)+def.motion.phase)*Math.PI*2;const wave=Math.sin(angle)*def.motion.amplitude;state.x=def.motion.axis.x*wave;state.z=def.motion.axis.z*wave;}
-    const dx=state.x-state.previousX,dz=state.z-state.previousZ;
-    if(dx||dz){for(const p of Object.values(s.players))if(p.supportId===def.id&&!p.fall){p.x+=dx;p.z+=dz;}for(const item of Object.values(s.worldItems))if(item.supportId===def.id&&item.mode!=='airborne'){item.x+=dx;item.z+=dz;}}
+  const dock=def.config.mode==='dock'?dockMotionAt(def.config,s.elapsed):null;
+  if(dock&&mechanismState.phase==='merged'&&dock.phase==='separating')for(const platform of s.layout.platforms.filter((entry)=>def.config.platformIds.includes(entry.id)))secureDockSeam(s,platform,def.config.offsets[platform.id]);
+  for(const platform of s.layout.platforms.filter((entry)=>def.config.platformIds.includes(entry.id))){
+    const state=s.platforms[platform.id];state.previousX=state.x;state.previousZ=state.z;
+    if(dock){const target=def.config.offsets[platform.id]||{x:0,z:0};state.x=target.x*dock.progress;state.z=target.z*dock.progress;}
+    else if(platform.motion){const angle=((s.elapsed/platform.motion.period)+platform.motion.phase)*Math.PI*2;const wave=Math.sin(angle)*platform.motion.amplitude;state.x=platform.motion.axis.x*wave;state.z=platform.motion.axis.z*wave;}
+    carryPlatformDelta(s,platform,state.x-state.previousX,state.z-state.previousZ);
   }
   for(const p of Object.values(s.players))if(!p.fall){const support=terrainAt(s.layout,runtime,p.x,p.z).supportId||null;p.supportId=support;}
+  if(dock){mechanismState.phase=dock.phase;mechanismState.remaining=dock.remaining;mechanismState.merged=dock.merged;}
 }
 function stepConveyor(ctx,def,state) {
   const s=ctx.state,config=def.config,origin=config.supportId?platformOrigin(s.layout,runtimeOf(s),config.supportId):{x:0,z:0},points=config.path.points.map((point)=>({x:point.x+origin.x,z:point.z+origin.z})),metrics=pathMetrics(points);
@@ -1084,7 +1114,7 @@ function stepGate(ctx,def,state) {
 }
 const noopMechanism=()=>{};
 const MECHANISM_REGISTRY={
-  movingPlatform:{create:(def)=>({type:def.type}),tick:(ctx,def)=>stepPlatforms(ctx.state,def.config.platformIds),getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
+  movingPlatform:{create:(def)=>({type:def.type,phase:def.config.mode==='dock'?'separated':null,remaining:def.config.separatedHold||0,merged:false}),tick:(ctx,def,state)=>stepPlatforms(ctx.state,def,state),getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
   conveyor:{create:(def)=>({type:def.type,direction:1,reverseIn:def.config.reverseEvery||0,warning:false}),tick:stepConveyor,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
   gate:{create:createGateState,tick:stepGate,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
   iceSurface:{create:(def)=>({type:def.type}),tick:noopMechanism,getCollision:noopMechanism,getInteractions:noopMechanism,getRenderState:noopMechanism,destroy:noopMechanism},
@@ -1226,10 +1256,7 @@ function stepGame(ctx) {
   s.nextOrderIn -= DT;
   if (s.nextOrderIn <= 0 && s.orders.length < MAX_ORDERS) {
     spawnOrder(ctx);
-    const pressure = Math.max(0.4, 1 - 0.15 * Math.max(0, s.difficultyLevel - 1));
-    const players=Math.max(2,Math.min(4,Object.keys(s.players).length));
-    const playerMultiplier=players===4?0.72:players===3?0.85:1;
-    s.nextOrderIn = Math.max(8, (ORDER_MIN_GAP + ctx.random() * ORDER_VAR_GAP) * pressure * playerMultiplier);
+    resetNextOrderIn(ctx);
   }
   for (let i = s.orders.length - 1; i >= 0; i--) {
     const o = s.orders[i];
@@ -1245,6 +1272,10 @@ function stepGame(ctx) {
       ctx.broadcast('order:expired', { name: o.name });
       if (s.mode === 'endless' && s.rage >= RAGE_MAX) { finishSession(ctx); return; }
     }
+  }
+  if (s.orders.length === 0) {
+    spawnOrder(ctx);
+    resetNextOrderIn(ctx);
   }
 
   // --- 终局 ---
@@ -1446,6 +1477,10 @@ function doInteract(ctx, p) {
         s.plates.due.push(DIRTY_DELAY);
         p.carrying = null;
         ctx.broadcast('order:served', { name: o.name, points: o.points, tip, by: p.name });
+        if (s.orders.length === 0) {
+          spawnOrder(ctx);
+          resetNextOrderIn(ctx);
+        }
       }
     }
     return;

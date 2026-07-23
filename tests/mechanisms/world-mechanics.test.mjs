@@ -46,9 +46,13 @@ test('普通外墙阻止坠落，雪山显式裂谷仍会触发坠落',()=>{
   const snow=roomFor('snow'),risky=snow.state.players.host;risky.x=6.5;risky.z=6.5;action(snow,definition,'host','move',{dx:1,dz:0,seq:1});pump(snow,4);assert.ok(risky.fall);
 });
 
-test('浮岛移动会携带所属玩家',()=>{
-  const ctx=roomFor('split'),state=ctx.state,player=state.players.host;assert.equal(player.supportId,'west');const before={x:player.x,z:player.z,platformZ:state.platforms.west.z};pump(ctx,10);assert.notEqual(state.platforms.west.z,before.platformZ);assert.ok(Math.abs((player.z-before.z)-(state.platforms.west.z-before.platformZ))<1e-6);
+test('一线天按 24 秒四阶段运行并携带岛上玩家',()=>{
+  const ctx=roomFor('split'),state=ctx.state,player=state.players.host,islands=state.mechanisms.islands;assert.equal(islands.phase,'separated');assert.equal(islands.merged,false);
+  pump(ctx,80);assert.equal(islands.phase,'merging');const before={x:player.x,platformX:state.platforms.west.x};pump(ctx,20);assert.ok(state.platforms.west.x>before.platformX);assert.ok(Math.abs((player.x-before.x)-(state.platforms.west.x-before.platformX))<1e-6);
+  pump(ctx,20);assert.equal(islands.phase,'merged');assert.equal(islands.merged,true);pump(ctx,80);assert.equal(islands.phase,'separating');pump(ctx,40);assert.equal(islands.phase,'separated');
 });
+
+test('一线天从合并状态分离时接缝玩家会被安全内推',()=>{const ctx=roomFor('split'),state=ctx.state,player=state.players.host;pump(ctx,120);assert.equal(state.mechanisms.islands.phase,'merged');player.x=9.95;player.z=6;player.supportId='west';pump(ctx,80);assert.equal(state.mechanisms.islands.phase,'separating');assert.equal(player.fall,null);assert.equal(player.supportId,'west');assert.ok(player.x<10);});
 
 test('传送带可挂载在单一移动平台并保持相对坐标',()=>{
   const ctx=roomFor('split'),state=ctx.state,def={id:'deck_belt',type:'conveyor',config:{supportId:'west',path:{points:[{x:1,z:5},{x:5,z:5}],speed:1}}};state.layout.mechanisms.push(def);state.mechanisms.deck_belt={type:'conveyor',direction:1,reverseIn:0,warning:false};
@@ -56,8 +60,10 @@ test('传送带可挂载在单一移动平台并保持相对坐标',()=>{
   const item=state.worldItems.deck_item;assert.ok(Math.abs(item.x-(platform.origin.x+state.platforms.west.x+1.5))<1e-6);assert.ok(Math.abs(item.z-(platform.origin.z+state.platforms.west.z+5))<1e-6);
 });
 
-test('环岛传送带运输物品并周期换向',()=>{
-  const ctx=roomFor('ring'),state=ctx.state,belt=state.layout.mechanisms.find((entry)=>entry.id==='ring_belt');state.worldItems.manual={id:'manual',content:{k:'raw',g:'tomato'},mode:'conveyor',conveyorId:belt.id,pathDistance:1,x:0,z:0,createdAt:state.elapsed,expiresAt:state.elapsed+30};const before=state.worldItems.manual.pathDistance;pump(ctx,5);assert.ok(state.worldItems.manual.pathDistance>before);const direction=state.mechanisms.ring_belt.direction;pump(ctx,200);assert.equal(state.mechanisms.ring_belt.direction,-direction);
+test('环岛东西短线独立运输，单侧出口阻塞不影响另一侧',()=>{
+  const ctx=roomFor('ring'),state=ctx.state,westIn=state.layout.stations.find((entry)=>entry.id==='ring_in_w'),westOut=state.layout.stations.find((entry)=>entry.id==='ring_out_w'),eastIn=state.layout.stations.find((entry)=>entry.id==='ring_in_e'),eastOut=state.layout.stations.find((entry)=>entry.id==='ring_out_e');
+  state.stations[westOut.id].item={k:'raw',g:'carrot'};state.stations[westIn.id].item={k:'raw',g:'tomato'};state.stations[eastIn.id].item={k:'raw',g:'onion'};pump(ctx,35);
+  assert.equal(state.stations[westOut.id].item?.g,'carrot');assert.equal(state.stations[eastOut.id].item?.g,'onion');assert.ok(Object.values(state.worldItems).some((entry)=>entry.conveyorId==='ring_belt_w'&&entry.content.g==='tomato'));assert.ok(!Object.values(state.mechanisms).some((entry)=>entry.reverseIn>0));
 });
 
 test('太空地图保持稳定且食物不会自动漂移',()=>{
@@ -114,7 +120,7 @@ test('输入台允许放入和取回，输出台只允许取货',()=>{
   pump(ctx,2);state.stations[output.id].item=null;player.carrying={k:'raw',g:'onion'};faceStation(state,player,output);action(ctx,definition,'host','interact',{phase:'start',seq:4});action(ctx,definition,'host','interact',{phase:'release',seq:4});assert.equal(state.stations[output.id].item,null);assert.equal(player.carrying?.g,'onion');
 });
 
-test('环岛循环带提供双输入和双输出接口',()=>{const ctx=roomFor('ring'),state=ctx.state,inputs=state.layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.portMode==='input'),outputs=state.layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.portMode==='output');assert.equal(inputs.length,2);assert.equal(outputs.length,2);state.stations[inputs[0].id].item={k:'raw',g:'tomato'};state.stations[inputs[1].id].item={k:'raw',g:'onion'};pump(ctx,1);assert.equal(Object.values(state.worldItems).filter((entry)=>entry.mode==='conveyor').length,2);pump(ctx,50);assert.ok(outputs.some((entry)=>state.stations[entry.id].item));});
+test('环岛双短线提供各自输入和输出接口',()=>{const ctx=roomFor('ring'),state=ctx.state,inputs=state.layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.portMode==='input'),outputs=state.layout.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.portMode==='output');assert.equal(inputs.length,2);assert.equal(outputs.length,2);state.stations[inputs[0].id].item={k:'raw',g:'tomato'};state.stations[inputs[1].id].item={k:'raw',g:'onion'};pump(ctx,1);assert.equal(Object.values(state.worldItems).filter((entry)=>entry.mode==='conveyor').length,2);pump(ctx,35);assert.ok(outputs.every((entry)=>state.stations[entry.id].item));});
 
 test('世界物品上限回收最旧物品，所有盘子销毁路径保持守恒',()=>{
   const ctx=roomFor('classic'),state=ctx.state,player=state.players.host;

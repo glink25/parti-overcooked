@@ -42,6 +42,8 @@ test('地图标识在工位、平台和机制之间全局唯一',()=>{
   for(const map of Object.values(maps)){const ids=[...map.stations,...map.platforms,...map.mechanisms].map((entry)=>entry.id);assert.equal(new Set(ids).size,ids.length,map.id);}
 });
 
+test('六张地图均提供至少四个通用空台',()=>{for(const map of Object.values(maps))assert.ok(map.stations.filter((entry)=>entry.type==='counter').length>=4,map.id);});
+
 test('全部传送带只由正交线段和专用输入输出台组成',()=>{for(const map of Object.values(maps))for(const belt of map.mechanisms.filter((entry)=>entry.type==='conveyor')){for(let index=1;index<belt.config.path.points.length;index++){const a=belt.config.path.points[index-1],b=belt.config.path.points[index];assert.ok((a.x===b.x)!==(a.z===b.z),`${map.id}:${belt.id}`);}const ports=map.stations.filter((entry)=>entry.type==='conveyorPort'&&entry.conveyorId===belt.id);assert.ok(ports.some((entry)=>entry.portMode==='input'),`${map.id}:${belt.id}:input`);assert.ok(ports.some((entry)=>entry.portMode==='output'),`${map.id}:${belt.id}:output`);}});
 
 test('工位、出生点和检查点全部位于有效地块',()=>{
@@ -71,8 +73,10 @@ test('城堡四组城门完整覆盖入口并声明四种双门阵',()=>{
   const gate=maps.castle.mechanisms.find((entry)=>entry.type==='gate');assert.equal(gate.config.groups.length,4);assert.ok(gate.config.groups.every((entry)=>entry.cells.length===3));assert.equal(gate.config.presets.length,4);assert.ok(gate.config.presets.every((entry)=>entry.open.length===2));assert.equal(gate.config.switchEvery,16);assert.equal(gate.config.warning,4);
 });
 
-test('环岛装卸口保留标记，雪山裂谷使用环境化危险元数据',()=>{
-  assert.equal(maps.ring.hazardMarkers.length,4);assert.equal(maps.snow.hazardMarkers,undefined);assert.equal(maps.snow.hazards.length,2);
+test('环岛只标记东西物流水道，雪山裂谷使用环境化危险元数据',()=>{
+  assert.equal(maps.ring.hazardMarkers.length,2);assert.equal(maps.snow.hazardMarkers,undefined);assert.equal(maps.snow.hazards.length,2);
   for(const marker of maps.ring.hazardMarkers)assert.ok(!['.','i','#'].includes(maps.ring.terrain[Math.floor(marker.z)]?.[Math.floor(marker.x)]));
   for(const hazard of maps.snow.hazards){assert.equal(hazard.type,'iceCrevasse');assert.equal(hazard.guardEdges.join(','),'north,south');for(const cell of hazard.cells)assert.ok(!['.','i','#'].includes(maps.snow.terrain[cell.z]?.[cell.x]));}
 });
+
+test('环岛使用两条独立非循环短线，中央出口可从中央岛操作',()=>{const map=maps.ring,belts=map.mechanisms.filter((entry)=>entry.type==='conveyor');assert.equal(belts.map((entry)=>entry.id).join(','),'ring_belt_w,ring_belt_e');for(const belt of belts){assert.notEqual(belt.config.path.loop,true);const ports=map.stations.filter((entry)=>entry.conveyorId===belt.id);assert.equal(ports.filter((entry)=>entry.portMode==='input').length,1);assert.equal(ports.filter((entry)=>entry.portMode==='output').length,1);const output=ports.find((entry)=>entry.portMode==='output');assert.ok(output.x>=8&&output.x<=12&&output.z>=6&&output.z<=10);}});

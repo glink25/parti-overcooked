@@ -80,8 +80,8 @@ function missingItems(have, need) {
 
 const MAP_META = [
   { id: 'classic', name: '经典厨房', ico: '🍳', desc: '紧凑双环厨房，用高台输入、输出线学习专职物流。' },
-  { id: 'split',   name: '一线天',   ico: '🏝️', desc: '本作唯一的移动浮岛地图，利用渡台与投掷完成跨岛协作。' },
-  { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '外环双输入、中央双输出，循环货运线每 20 秒换向。' },
+  { id: 'split',   name: '一线天',   ico: '🏝️', desc: '双岛周期合并：分离时投掷交接，靠岸后安全换区。' },
+  { id: 'ring',    name: '环岛餐吧', ico: '🎡', desc: '外环备菜经东西双短线送入可自由行走的中央烹饪区。' },
   { id: 'snow', name: '雪山餐车', ico: '❄️', desc: '冰面控制、高台缆车与有护栏的可读冰裂谷共同制造挑战。' },
   { id: 'space', name: '太空厨房', ico: '🚀', desc: '稳定的 U 形空间站，利用两条封闭气闸货运线组织左右物流。' },
   { id: 'castle', name: '城堡宴会厅', ico: '🏰', desc: '四组三格城门随机换阵，外围勤务环道始终保持连通。' },

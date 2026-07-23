@@ -29,13 +29,13 @@ test('六张地图均可由两人和四人启动并持续运行',()=>{
   }
 });
 
-test('一线天所有运动相位的核心跨岛投掷距离不超过 5.5 格',()=>{
-  const map=definition.__maps.split,west=map.stations.find((entry)=>entry.id==='counter_w'),east=map.stations.find((entry)=>entry.id==='counter_e');
-  for(let tick=0;tick<160;tick++){
-    const time=tick/10;
-    const point=(station)=>{const platform=map.platforms.find((entry)=>entry.id===station.supportId),motion=platform.motion,wave=Math.sin(((time/motion.period)+motion.phase)*Math.PI*2)*motion.amplitude;return{x:platform.origin.x+station.x+.5+motion.axis.x*wave,z:platform.origin.z+station.z+.5+motion.axis.z*wave};};
-    const a=point(west),b=point(east);assert.ok(Math.hypot(a.x-b.x,a.z-b.z)<=5.5+1e-9,`tick ${tick}`);
-  }
+test('一线天分离时交接台在投掷距离内，合并时两岛无缝相接',()=>{
+  const map=definition.__maps.split,mechanism=map.mechanisms.find((entry)=>entry.id==='islands'),west=map.platforms.find((entry)=>entry.id==='west'),east=map.platforms.find((entry)=>entry.id==='east');
+  assert.equal(map.platforms.map((entry)=>entry.id).join(','),'west,east');assert.equal(mechanism.config.cycle,24);
+  const westCounter=map.stations.find((entry)=>entry.id==='counter_w'),eastCounter=map.stations.find((entry)=>entry.id==='counter_e');
+  const point=(station,progress)=>{const platform=map.platforms.find((entry)=>entry.id===station.supportId),offset=mechanism.config.offsets[platform.id];return{x:platform.origin.x+station.x+.5+offset.x*progress,z:platform.origin.z+station.z+.5};};
+  const separated=[point(westCounter,0),point(eastCounter,0)];assert.ok(Math.hypot(separated[0].x-separated[1].x,separated[0].z-separated[1].z)<=5.5);
+  const westEdge=west.origin.x+6+mechanism.config.offsets.west.x,eastEdge=east.origin.x+mechanism.config.offsets.east.x;assert.equal(westEdge,eastEdge);
 });
 
 test('太空两人局提供外围舱之间的固定勤务通道',()=>{const map=definition.__maps.space;assert.ok([...Array(12)].every((_,index)=>map.terrain[12][index+6]==='.'));});
