@@ -1,0 +1,54 @@
+{
+  "partiVersion": "0.1.0",
+  "protocolVersion": 1,
+  "id": "overcooked-party",
+  "name": "新手上厨",
+  "version": "3.1",
+  "packageMode": "blob",
+  "description": "Low-poly 3D 合作厨房派对：异形大地图、移动浮岛、传送带、蓄力投掷与地面物品物流。",
+  "cover": "cover-newbie-chefs.jpg",
+  "tags": [
+    "co-op",
+    "3d"
+  ],
+  "author": {
+    "name": "glink25"
+  },
+  "entry": {
+    "ui": "index.html",
+    "worker": "room.worker.js"
+  },
+  "room": {
+    "minPlayers": 2,
+    "maxPlayers": 4,
+    "allowSpectators": false
+  },
+  "sync": {
+    "mode": "snapshot"
+  },
+  "permissions": {
+    "network": false,
+    "storage": "session",
+    "camera": false,
+    "microphone": false,
+    "clipboard": false,
+    "sensors": []
+  },
+  "actions": {
+    "selectMode": {
+      "payload": "{ mode: 'party' | 'endless' }"
+    },
+    "start": {},
+    "rematch": {},
+    "toLobby": {},
+    "move": {
+      "payload": "{ dx: number, dz: number, seq: number }"
+    },
+    "work": {
+      "payload": "{ active: boolean, seq: number }"
+    },
+    "interact": {
+      "payload": "{ phase: 'start' | 'release' | 'cancel', seq: number }"
+    }
+  }
+}
